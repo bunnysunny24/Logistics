@@ -33,7 +33,7 @@ function AnomalyDashboard() {
 
   useEffect(() => {
     loadAnomalies();
-  }, [filters]);
+  }, [filters]); // loadAnomalies is called inside, dependency on filters is correct
 
   const loadAnomalies = async () => {
     try {
