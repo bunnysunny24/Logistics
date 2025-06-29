@@ -19,10 +19,12 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
       setLoading(true);
       try {
         const response = await getAnomalies({ minRiskScore });
-        setAnomalies(response.anomalies || []);
+        // Handle both array response and object with anomalies property
+        const anomaliesData = Array.isArray(response) ? response : (response.anomalies || []);
+        setAnomalies(anomaliesData);
         
         // Prepare chart data
-        prepareChartData(response.anomalies || []);
+        prepareChartData(anomaliesData);
       } catch (error) {
         console.error('Error fetching anomalies:', error);
       } finally {

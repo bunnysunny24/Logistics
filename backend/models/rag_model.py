@@ -354,23 +354,47 @@ ANSWER:"""
     
     def _format_invoice_document(self, invoice_data):
         """Format invoice data into searchable text"""
+        # Safe number formatting
+        try:
+            amount = float(invoice_data.get('amount', 0.0))
+            amount_str = f"${amount:,.2f}"
+        except (ValueError, TypeError):
+            amount_str = f"${invoice_data.get('amount', 'Unknown')}"
+        
+        try:
+            discount = float(invoice_data.get('early_discount', 0.0))
+            discount_str = f"{discount*100:.1f}%"
+            discount_desc = f"{discount*100:.1f}%"
+        except (ValueError, TypeError):
+            discount_str = f"{invoice_data.get('early_discount', 'Unknown')}"
+            discount_desc = f"{invoice_data.get('early_discount', 'Unknown')}"
+        
         return f"""
 Invoice ID: {invoice_data.get('invoice_id', 'Unknown')}
 Supplier: {invoice_data.get('supplier', 'Unknown')}
-Amount: ${invoice_data.get('amount', 0.0):,.2f} {invoice_data.get('currency', 'USD')}
+Amount: {amount_str} {invoice_data.get('currency', 'USD')}
 Issue Date: {invoice_data.get('issue_date', 'Unknown')}
 Due Date: {invoice_data.get('due_date', 'Unknown')}
 Payment Terms: {invoice_data.get('payment_terms', 'Unknown')}
-Early Discount: {invoice_data.get('early_discount', 0.0)*100:.1f}%
+Early Discount: {discount_str}
 Status: {invoice_data.get('status', 'Unknown')}
 Approver: {invoice_data.get('approver', 'Unknown')}
 
-This invoice shows payment terms of {invoice_data.get('payment_terms', 'NET30')} with an early payment discount of {invoice_data.get('early_discount', 0.0)*100:.1f}%.
-The invoice amount is ${invoice_data.get('amount', 0.0):,.2f} and is currently {invoice_data.get('status', 'pending')}.
+This invoice shows payment terms of {invoice_data.get('payment_terms', 'NET30')} with an early payment discount of {discount_desc}.
+The invoice amount is {amount_str} and is currently {invoice_data.get('status', 'pending')}.
         """.strip()
     
     def _format_shipment_document(self, shipment_data):
         """Format shipment data into searchable text"""
+        # Safe number formatting
+        try:
+            risk_score = float(shipment_data.get('risk_score', 0.0))
+            risk_str = f"{risk_score:.2f}"
+            risk_desc = f"{risk_score:.2f}"
+        except (ValueError, TypeError):
+            risk_str = f"{shipment_data.get('risk_score', 'Unknown')}"
+            risk_desc = f"{shipment_data.get('risk_score', 'Unknown')}"
+        
         return f"""
 Shipment ID: {shipment_data.get('shipment_id', 'Unknown')}
 Route: {shipment_data.get('origin', 'Unknown')} → {shipment_data.get('destination', 'Unknown')}
@@ -379,12 +403,12 @@ Departure Date: {shipment_data.get('departure_date', 'Unknown')}
 Estimated Arrival: {shipment_data.get('estimated_arrival', 'Unknown')}
 Actual Arrival: {shipment_data.get('actual_arrival', 'TBD')}
 Status: {shipment_data.get('status', 'Unknown')}
-Risk Score: {shipment_data.get('risk_score', 0.0):.2f}
+Risk Score: {risk_str}
 Anomaly Type: {shipment_data.get('anomaly_type', 'none')}
 
 This shipment is traveling from {shipment_data.get('origin', 'Unknown')} to {shipment_data.get('destination', 'Unknown')} 
 via {shipment_data.get('carrier', 'Unknown')}. Current status is {shipment_data.get('status', 'Unknown')} 
-with a risk score of {shipment_data.get('risk_score', 0.0):.2f}.
+with a risk score of {risk_desc}.
 {f"Detected anomaly: {shipment_data.get('anomaly_type')}" if shipment_data.get('anomaly_type') != 'none' else "No anomalies detected."}
         """.strip()
     

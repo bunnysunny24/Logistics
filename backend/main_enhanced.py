@@ -72,6 +72,134 @@ except Exception as e:
     anomaly_detector = None
     document_processor = None
 
+# Startup function to detect anomalies from existing data
+async def detect_startup_anomalies():
+    """Detect anomalies from existing data files on startup"""
+    if not anomaly_detector:
+        print("⚠️ Anomaly detector not available for startup detection")
+        return
+    
+    try:
+        print("🔍 Running anomaly detection on existing data...")
+        detected_anomalies = []
+        
+        # Process invoice files
+        invoices_dir = os.path.join(DATA_DIR, "invoices")
+        if os.path.exists(invoices_dir):
+            # Prioritize comprehensive files
+            priority_files = ["comprehensive_invoices.csv"]
+            all_files = [f for f in os.listdir(invoices_dir) if f.endswith('.csv')]
+            
+            # Process priority files first, then others
+            files_to_process = priority_files + [f for f in all_files if f not in priority_files]
+            
+            for filename in files_to_process:
+                if not os.path.exists(os.path.join(invoices_dir, filename)):
+                    continue
+                    
+                try:
+                    file_path = os.path.join(invoices_dir, filename)
+                    df = pd.read_csv(file_path)
+                    
+                    print(f"🔍 Processing file: {filename} ({len(df)} rows)")
+                    
+                    # Process each row as a document
+                    for _, row in df.iterrows():
+                        invoice_data = row.to_dict()
+                        # Convert any NaN values to None
+                        invoice_data = {k: (v if pd.notna(v) else None) for k, v in invoice_data.items()}
+                        
+                        # Debug: Print invoice data to see what we're processing
+                        print(f"🔍 Processing invoice: {invoice_data.get('invoice_id', 'unknown')} - Amount: {invoice_data.get('amount', 'N/A')}")
+                        
+                        # Skip rows that don't have invoice_id (line items)
+                        if not invoice_data.get('invoice_id') or invoice_data.get('invoice_id') in ['item', 'quantity']:
+                            continue
+                        
+                        anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
+                        detected_anomalies.extend(anomalies)
+                        print(f"   Found {len(anomalies)} anomalies for this invoice")
+                        
+                        # Break after processing comprehensive file to avoid duplicates
+                        if filename == "comprehensive_invoices.csv":
+                            break
+                except Exception as e:
+                    print(f"⚠️ Error processing invoice file {filename}: {e}")
+        
+        # Process shipment files  
+        shipments_dir = os.path.join(DATA_DIR, "shipments")
+        if os.path.exists(shipments_dir):
+            # Prioritize comprehensive files
+            priority_files = ["comprehensive_shipments.csv"]
+            all_files = [f for f in os.listdir(shipments_dir) if f.endswith('.csv')]
+            
+            # Process priority files first, then others
+            files_to_process = priority_files + [f for f in all_files if f not in priority_files]
+            
+            for filename in files_to_process:
+                if not os.path.exists(os.path.join(shipments_dir, filename)):
+                    continue
+                    
+                try:
+                    file_path = os.path.join(shipments_dir, filename)
+                    df = pd.read_csv(file_path)
+                    
+                    print(f"🔍 Processing file: {filename} ({len(df)} rows)")
+                    
+                    # Process each row as a document
+                    for _, row in df.iterrows():
+                        shipment_data = row.to_dict()
+                        # Convert any NaN values to None
+                        shipment_data = {k: (v if pd.notna(v) else None) for k, v in shipment_data.items()}
+                        
+                        # Debug: Print shipment data
+                        print(f"🔍 Processing shipment: {shipment_data.get('shipment_id', 'unknown')}")
+                        
+                        # Skip invalid rows
+                        if not shipment_data.get('shipment_id'):
+                            continue
+                        
+                        anomalies = anomaly_detector.detect_shipment_anomalies(shipment_data)
+                        detected_anomalies.extend(anomalies)
+                        print(f"   Found {len(anomalies)} anomalies for this shipment")
+                        
+                        # Break after processing comprehensive file to avoid duplicates
+                        if filename == "comprehensive_shipments.csv":
+                            break
+                except Exception as e:
+                    print(f"⚠️ Error processing shipment file {filename}: {e}")
+        
+        # Save detected anomalies
+        if detected_anomalies:
+            # Save to file
+            anomaly_detector.save_anomalies(detected_anomalies)
+            
+            # Also save to the in-memory anomalies list
+            anomaly_detector.anomalies = [
+                {
+                    "id": a.id,
+                    "document_id": a.document_id,
+                    "anomaly_type": a.anomaly_type,
+                    "risk_score": a.risk_score,
+                    "severity": a.severity,
+                    "description": a.description,
+                    "evidence": a.evidence,
+                    "recommendations": a.recommendations,
+                    "timestamp": a.timestamp,
+                    "metadata": a.metadata
+                } for a in detected_anomalies
+            ]
+            print(f"✅ Detected and saved {len(detected_anomalies)} anomalies")
+            
+            # Print some details about detected anomalies
+            for anomaly in detected_anomalies[:5]:  # Show first 5
+                print(f"   - {anomaly.anomaly_type}: {anomaly.description} (Risk: {anomaly.risk_score:.2f})")
+        else:
+            print("ℹ️ No anomalies detected in existing data")
+            
+    except Exception as e:
+        print(f"❌ Error during startup anomaly detection: {e}")
+
 app = FastAPI(
     title="Logistics Pulse Copilot API", 
     version="2.0.0",
@@ -120,6 +248,12 @@ class SystemStatus(BaseModel):
     status: str
     components: Dict[str, Any]
     data_summary: Dict[str, Any]
+
+# Startup event to detect anomalies from existing data
+@app.on_event("startup")
+async def startup_event():
+    """Run startup tasks including anomaly detection"""
+    await detect_startup_anomalies()
 
 # Enhanced API endpoints
 
@@ -559,3 +693,7 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
+    # Run startup anomaly detection
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(detect_startup_anomalies())
