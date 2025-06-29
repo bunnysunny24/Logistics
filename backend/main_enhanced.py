@@ -370,46 +370,37 @@ async def query_documents(query: ChatMessage):
 async def api_query_documents(query: ChatMessage):
     """Query documents using RAG - API version"""
     try:
-        # Use actual RAG model instead of mock responses
+        # Log the query
+        logger.info(f"Processing query: {query.message}")
+        
+        # Use actual RAG model
         if rag_model:
-            result = rag_model.process_query(query.message, query.context)
-            return QueryResponse(**result)
+            try:
+                # Process query with RAG model
+                result = rag_model.process_query(query.message, query.context)
+                logger.info(f"Query processed successfully with confidence: {result.get('confidence', 0)}")
+                return QueryResponse(**result)
+            except Exception as e:
+                logger.error(f"Error in RAG query processing: {e}")
+                # Return error response
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"Error processing query: {str(e)}"}
+                )
         else:
-            # Fallback to mock responses if RAG model isn't available
-            mock_responses = {
-                "shipment": {
-                    "answer": "Based on the shipment data, there are currently 149 delayed shipments out of 1247 total shipments. The main causes include weather delays and customs processing delays.",
-                    "sources": ["shipment_001.pdf", "logistics_report.pdf"],
-                    "confidence": 0.85
-                },
-                "invoice": {
-                    "answer": "The invoice analysis shows a total of 892 invoices with a combined amount of $2,456,789.50. There are 23 detected anomalies, primarily involving amount discrepancies.",
-                    "sources": ["invoice_summary.pdf", "financial_report.pdf"],
-                    "confidence": 0.92
-                },
-                "default": {
-                    "answer": "I found relevant information in the logistics database. The system is tracking shipments, invoices, and detecting anomalies in real-time.",
-                    "sources": ["general_data.pdf"],
-                    "confidence": 0.75
-                }
-            }
-            
-            # Simple keyword matching for demo
-            query_lower = query.message.lower()
-            if "shipment" in query_lower or "delivery" in query_lower:
-                response = mock_responses["shipment"]
-            elif "invoice" in query_lower or "payment" in query_lower:
-                response = mock_responses["invoice"]
-            else:
-                response = mock_responses["default"]
-            
-            return QueryResponse(**response)
-    
+            # RAG model not available - use mock response with clear indication
+            logger.warning("RAG model not available, using mock response")
+            return QueryResponse(
+                answer="I'm currently running in demo mode without accessing your uploaded documents. Please ensure the RAG model is properly initialized.",
+                sources=[],
+                confidence=0.1,
+                metadata={"mock_response": True}
+            )
     except Exception as e:
         logger.error(f"Query failed: {str(e)}")
         return JSONResponse(
             status_code=500,
-            content={"error": f"Query processing failed. Error: {str(e)}"}
+            content={"error": f"Query processing failed: {str(e)}"}
         )
 
 @app.post("/upload")
@@ -437,8 +428,8 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @app.post("/api/upload")
-async def ingest_document(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    """Ingest and process a document"""
+async def ingest_document(file: UploadFile = File(...)):
+    """Ingest and process a document - API version"""
     try:
         # Save the uploaded file
         upload_dir = os.path.join(DATA_DIR, "uploads")
@@ -449,52 +440,71 @@ async def ingest_document(file: UploadFile = File(...), background_tasks: Backgr
             content = await file.read()
             buffer.write(content)
         
+        # Log the upload
+        logger.info(f"Document uploaded: {file_path}")
+        
         # Determine document type based on filename
         doc_type = "invoice" if "invoice" in file.filename.lower() else "shipment"
         
-        # Process the document and add to RAG index (in background to not block response)
-        if background_tasks:
-            background_tasks.add_task(process_and_index_document, file_path, doc_type)
+        # Extract content based on file type
+        extracted_text = ""
+        if file_path.lower().endswith('.pdf'):
+            # Make sure document_processor is initialized
+            if document_processor:
+                extracted_text = document_processor.extract_text_from_pdf(file_path)
+                logger.info(f"Extracted {len(extracted_text)} characters from PDF")
+            else:
+                logger.error("Document processor not initialized")
+        elif file_path.lower().endswith('.txt'):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    extracted_text = f.read()
+                logger.info(f"Read {len(extracted_text)} characters from text file")
+            except UnicodeDecodeError:
+                # Try with a different encoding if UTF-8 fails
+                with open(file_path, 'r', encoding='latin-1') as f:
+                    extracted_text = f.read()
+                logger.info(f"Read {len(extracted_text)} characters from text file with latin-1 encoding")
         else:
-            # Process immediately for testing
-            process_and_index_document(file_path, doc_type)
+            logger.warning(f"Unsupported file type: {file_path}")
+            extracted_text = f"Content of {file.filename} (format not supported for extraction)"
+        
+        # Add to RAG index if we have content and the RAG model is available
+        rag_indexed = False
+        if extracted_text and rag_model:
+            try:
+                # Add to RAG index
+                success = rag_model.add_document_to_index(
+                    content=extracted_text,
+                    doc_type=doc_type,
+                    metadata={"source": file.filename, "path": file_path}
+                )
+                rag_indexed = success
+                if success:
+                    logger.info(f"Document {file.filename} added to RAG index")
+                else:
+                    logger.error(f"Failed to add document to RAG index")
+            except Exception as e:
+                logger.error(f"Error adding to RAG index: {e}")
+        else:
+            if not extracted_text:
+                logger.warning("No text extracted from document")
+            if not rag_model:
+                logger.warning("RAG model not available")
         
         return {
             "success": True,
-            "message": "Document uploaded and processing started",
+            "message": "Document processed successfully",
             "filename": file.filename,
+            "size": len(content),
+            "text_extracted": len(extracted_text) > 0,
+            "rag_indexed": rag_indexed,
             "document_type": doc_type
         }
     except Exception as e:
-        logger.error(f"Failed to ingest document: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to ingest document: {str(e)}")
-
-# Add this function to process and index the document
-async def process_and_index_document(file_path, doc_type):
-    try:
-        logger.info(f"Processing document: {file_path}")
-        
-        # Extract text from document
-        if file_path.lower().endswith('.pdf'):
-            # For PDF, use document processor
-            extracted_data = document_processor.extract_text_from_pdf(file_path)
-        elif file_path.lower().endswith('.txt'):
-            # For text files, read directly
-            with open(file_path, 'r', encoding='utf-8') as f:
-                extracted_data = f.read()
-        else:
-            logger.warning(f"Unsupported file type: {file_path}")
-            return
-        
-        # Add to RAG index
-        if extracted_data and rag_model:
-            logger.info(f"Adding document to RAG index: {file_path}")
-            rag_model.add_document_to_index(extracted_data, doc_type, {"source": file_path})
-        else:
-            logger.warning(f"Failed to extract data or RAG model not available")
-    
-    except Exception as e:
-        logger.error(f"Error processing document {file_path}: {str(e)}")
+        error_msg = f"Failed to process document: {str(e)}"
+        logger.error(error_msg)
+        return JSONResponse(status_code=500, content={"error": error_msg})
 
 @app.get("/api/anomalies")
 async def get_anomalies(
@@ -563,6 +573,39 @@ async def get_anomalies(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving anomalies: {str(e)}")
+
+@app.get("/api/indexed-documents")
+async def get_indexed_documents():
+    """Get list of documents indexed in the RAG system"""
+    if not rag_model:
+        return {"documents": [], "error": "RAG model not initialized"}
+    
+    documents = []
+    for doc_type, store in rag_model.vector_stores.items():
+        try:
+            # Get doc IDs from vector store
+            doc_ids = list(store.docstore._dict.keys()) if hasattr(store, 'docstore') else []
+            
+            # Get document metadata
+            for doc_id in doc_ids:
+                try:
+                    doc = store.docstore.search(doc_id)
+                    if doc:
+                        documents.append({
+                            "id": str(doc_id),
+                            "type": doc_type,
+                            "source": doc.metadata.get("source", "unknown"),
+                            "timestamp": doc.metadata.get("timestamp", "unknown"),
+                            "preview": doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content
+                        })
+                except:
+                    # Skip problematic documents
+                    continue
+        except Exception as e:
+            logger.error(f"Error getting document list for {doc_type}: {e}")
+    
+    return {"documents": documents, "count": len(documents)}
+
 
 @app.get("/anomalies")
 async def get_legacy_anomalies():

@@ -845,27 +845,49 @@ with a risk score of {risk_desc}.
             if not metadata:
                 metadata = {}
         
-        # Create document object
-            doc = Document(
-                page_content=content,
-                metadata={
-                    "source": metadata.get("source", "unknown"),
-                    "doc_type": doc_type,
-                    "timestamp": datetime.now().isoformat(),
-                    **metadata
-                }
+        # Create text chunks for better indexing
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                separators=["\n\n", "\n", ". ", " ", ""]
             )
         
-        # Add to appropriate vector store
+        # Split text into chunks
+            chunks = text_splitter.split_text(content)
+            logger.info(f"Split document into {len(chunks)} chunks")
+        
+        # Create document objects
+            docs = []
+            for i, chunk in enumerate(chunks):
+            # Skip empty chunks
+                if not chunk.strip():
+                    continue
+                
+                docs.append(Document(
+                    page_content=chunk,
+                    metadata={
+                        "source": metadata.get("source", "unknown"),
+                        "doc_type": doc_type,
+                        "chunk_id": i,
+                        "timestamp": datetime.now().isoformat(),
+                        **metadata
+                    }
+                ))
+        
+            if not docs:
+                logger.warning("No valid content chunks to index")
+                return False
+        
+            # Add to appropriate vector store
             if doc_type not in self.vector_stores:
                 # Initialize new vector store if needed
-                self.vector_stores[doc_type] = FAISS.from_documents([doc], self.embeddings)
-                logger.info(f"Created new vector store for {doc_type}")
+                self.vector_stores[doc_type] = FAISS.from_documents(docs, self.embeddings)
+                logger.info(f"Created new vector store for {doc_type} with {len(docs)} chunks")
             else:
-            # Add to existing vector store
-                self.vector_stores[doc_type].add_documents([doc])
-                logger.info(f"Added document to existing {doc_type} vector store")
-        
+                # Add to existing vector store
+                self.vector_stores[doc_type].add_documents(docs)
+                logger.info(f"Added {len(docs)} chunks to existing {doc_type} vector store")
+
             # Update last checked time
             self.last_checked[doc_type] = time.time()
         

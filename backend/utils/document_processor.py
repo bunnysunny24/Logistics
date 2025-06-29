@@ -108,26 +108,27 @@ class DocumentProcessor:
             raise
     
     def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extract text from PDF"""
+        """Extract text from PDF files using PyPDF2"""
         try:
-            # In a production system, you would use a library like PyPDF2 or pdfplumber
-            # For now, use a simple placeholder for testing
-            with open(pdf_path, 'rb') as f:
-                # Read first few bytes to check if it's a valid PDF
-                header = f.read(5)
-                if header != b'%PDF-':
-                    logger.warning(f"File does not appear to be a valid PDF: {pdf_path}")
-                    return ""
-            
-            # Return a simple message for testing
-            # In production, replace with actual PDF text extraction
-            return f"Content extracted from PDF file: {os.path.basename(pdf_path)}\n" + \
-                   f"This is placeholder text for {os.path.basename(pdf_path)}.\n" + \
-                   f"In production, this would contain the actual text content of the PDF."
+            import PyPDF2  # You may need to install this: pip install PyPDF2
         
+            text = ""
+            with open(pdf_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                for page_num in range(len(reader.pages)):
+                    page = reader.pages[page_num]
+                    text += page.extract_text() + "\n\n"
+        
+            if not text.strip():
+                logger.warning(f"No text extracted from PDF: {pdf_path}")
+                # Fallback text if extraction fails
+            text = f"Document: {os.path.basename(pdf_path)}\nNo extractable text content found."
+
+            return text
+    
         except Exception as e:
             logger.error(f"Error extracting text from PDF {pdf_path}: {e}")
-            return ""
+            return f"Error extracting text from {os.path.basename(pdf_path)}: {str(e)}"
     
     def extract_invoice_data(self, invoice_path: str) -> Dict[str, Any]:
         """
