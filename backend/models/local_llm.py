@@ -14,12 +14,14 @@ class LocalHuggingFaceLLM(LLM):
     device: Optional[str] = None
     model_kwargs: Dict[str, Any] = {}
     
-    _model = None
-    _tokenizer = None
-    
     def __init__(self, model_name=None, **kwargs):
         """Initialize the local LLM."""
         super().__init__(**kwargs)
+        
+        # Initialize instance variables
+        self._model = None
+        self._tokenizer = None
+        self.pipeline = None
         
         if model_name:
             self.model_name = model_name
@@ -65,8 +67,12 @@ class LocalHuggingFaceLLM(LLM):
                 device=0 if self.device == "cuda" else -1
             )
             
+            logger.info(f"Successfully initialized text generation pipeline")
+            
         except Exception as e:
             logger.error(f"Failed to initialize model: {e}")
+            # Set pipeline to None so we know it failed
+            self.pipeline = None
             raise e
     
     def _call(

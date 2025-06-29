@@ -43,10 +43,22 @@ class LogisticsPulseRAG:
             self.llm = None  # Fall back to template responses
             
         # Local embeddings
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=self.embedding_model
-        )
-        logger.info(f"Successfully initialized local embeddings: {self.embedding_model}")
+        try:
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=self.embedding_model
+            )
+            logger.info(f"Successfully initialized local embeddings: {self.embedding_model}")
+        except Exception as e:
+            logger.error(f"Failed to load embeddings model {self.embedding_model}: {e}")
+            # Try a more basic model as fallback
+            try:
+                self.embeddings = HuggingFaceEmbeddings(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+                logger.info("Successfully initialized fallback embeddings model")
+            except Exception as e2:
+                logger.error(f"Failed to load fallback embeddings: {e2}")
+                self.embeddings = None
         
         # Load and refresh data
         self.load_prompts()

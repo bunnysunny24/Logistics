@@ -53,6 +53,10 @@ class PDFProcessor:
         else:
             raise ValueError(f"Unsupported document type: {doc_type}")
     
+    def extract_text_from_pdf(self, pdf_path: str) -> str:
+        """Public method to extract text from PDF - wrapper for _extract_text_from_pdf"""
+        return self._extract_text_from_pdf(pdf_path)
+    
     def _extract_text_from_pdf(self, pdf_path: str) -> str:
         """Extract all text content from PDF"""
         try:
