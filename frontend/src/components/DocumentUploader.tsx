@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { uploadDocument } from '@/lib/api';
-import { FiUpload, FiFile, FiFileText, FiTruck, FiBook, FiCheck, FiX } from 'react-icons/fi';
+import { FiUpload, FiFileText, FiTruck, FiBook, FiCheck, FiX } from 'react-icons/fi';
 
 type Props = {
   onUploadComplete?: () => void;
@@ -53,17 +53,25 @@ export default function DocumentUploader({ onUploadComplete }: Props) {
   };
   
   return (
-    <div className="bg-white shadow-md rounded-lg p-6 mb-6">
-      <h2 className="text-lg font-semibold mb-4">Upload Document</h2>
+    <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-6 animate-fade-in">
+      <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+        <h2 className="text-xl font-bold text-gray-800 flex items-center">
+          <FiUpload className="mr-3 text-blue-600" />
+          Document Upload Center
+        </h2>
+      </div>
       
-      <form onSubmit={handleUpload}>
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Document Type
+      <form onSubmit={handleUpload} className="space-y-6">
+        {/* Document Type Selection */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-3">
+            Select Document Type
           </label>
-          <div className="flex space-x-4">
-            <label className={`flex items-center p-3 border rounded-md cursor-pointer ${
-              docType === 'invoice' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <label className={`relative flex items-center p-4 border-2 rounded-lg cursor-pointer transition-all duration-200 ${
+              docType === 'invoice' 
+                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
+                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
             }`}>
               <input
                 type="radio"
@@ -73,12 +81,24 @@ export default function DocumentUploader({ onUploadComplete }: Props) {
                 onChange={() => setDocType('invoice')}
                 className="sr-only"
               />
-              <FiFileText className="h-5 w-5 mr-2 text-gray-600" />
-              <span>Invoice</span>
+              <div className="flex items-center">
+                <FiFileText className={`h-6 w-6 mr-3 ${
+                  docType === 'invoice' ? 'text-blue-600' : 'text-gray-500'
+                }`} />
+                <div>
+                  <span className="font-medium text-gray-800">Invoice</span>
+                  <p className="text-xs text-gray-500">Bills, receipts, payment docs</p>
+                </div>
+              </div>
+              {docType === 'invoice' && (
+                <FiCheck className="h-5 w-5 text-blue-600" />
+              )}
             </label>
             
-            <label className={`flex items-center p-3 border rounded-md cursor-pointer ${
-              docType === 'shipment' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+            <label className={`relative flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-all duration-200 ${
+              docType === 'shipment' 
+                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
+                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
             }`}>
               <input
                 type="radio"
@@ -88,12 +108,24 @@ export default function DocumentUploader({ onUploadComplete }: Props) {
                 onChange={() => setDocType('shipment')}
                 className="sr-only"
               />
-              <FiTruck className="h-5 w-5 mr-2 text-gray-600" />
-              <span>Shipment</span>
+              <div className="flex items-center">
+                <FiTruck className={`h-6 w-6 mr-3 ${
+                  docType === 'shipment' ? 'text-blue-600' : 'text-gray-500'
+                }`} />
+                <div>
+                  <span className="font-medium text-gray-800">Shipment</span>
+                  <p className="text-xs text-gray-500">Delivery docs, BOL, manifests</p>
+                </div>
+              </div>
+              {docType === 'shipment' && (
+                <FiCheck className="h-5 w-5 text-blue-600" />
+              )}
             </label>
             
-            <label className={`flex items-center p-3 border rounded-md cursor-pointer ${
-              docType === 'policy' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+            <label className={`relative flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-all duration-200 ${
+              docType === 'policy' 
+                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
+                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
             }`}>
               <input
                 type="radio"
@@ -103,35 +135,50 @@ export default function DocumentUploader({ onUploadComplete }: Props) {
                 onChange={() => setDocType('policy')}
                 className="sr-only"
               />
-              <FiBook className="h-5 w-5 mr-2 text-gray-600" />
-              <span>Policy</span>
+              <div className="flex items-center">
+                <FiBook className={`h-6 w-6 mr-3 ${
+                  docType === 'policy' ? 'text-blue-600' : 'text-gray-500'
+                }`} />
+                <div>
+                  <span className="font-medium text-gray-800">Policy</span>
+                  <p className="text-xs text-gray-500">Guidelines, procedures, terms</p>
+                </div>
+              </div>
+              {docType === 'policy' && (
+                <FiCheck className="h-5 w-5 text-blue-600" />
+              )}
             </label>
           </div>
         </div>
         
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            File
+        {/* File Upload Section */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-3">
+            Upload Document
           </label>
           <div className="flex items-center justify-center w-full">
-            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
+            <label className={`flex flex-col items-center justify-center w-full h-40 border-3 border-dashed rounded-xl cursor-pointer transition-all duration-300 ${
+              file 
+                ? 'border-green-400 bg-green-50 hover:bg-green-100' 
+                : 'border-gray-300 bg-gray-50 hover:bg-gray-100 hover:border-gray-400'
+            }`}>
+              <div className="flex flex-col items-center justify-center py-6 px-4">
                 {file ? (
                   <>
-                    <FiFile className="w-8 h-8 mb-2 text-gray-500" />
-                    <p className="text-sm text-gray-500">{file.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {(file.size / 1024).toFixed(2)} KB
+                    <FiCheck className="w-12 h-12 mb-3 text-green-500" />
+                    <p className="text-lg font-medium text-green-700">{file.name}</p>
+                    <p className="text-sm text-green-600">
+                      {(file.size / (1024 * 1024)).toFixed(2)} MB • Ready to upload
                     </p>
                   </>
                 ) : (
                   <>
-                    <FiUpload className="w-8 h-8 mb-2 text-gray-500" />
-                    <p className="text-sm text-gray-500">
-                      <span className="font-semibold">Click to upload</span> or drag and drop
+                    <FiUpload className="w-12 h-12 mb-3 text-gray-400" />
+                    <p className="text-lg font-medium text-gray-700">
+                      Drop your file here or <span className="text-blue-600">click to browse</span>
                     </p>
-                    <p className="text-xs text-gray-500">
-                      PDF or CSV (max. 10MB)
+                    <p className="text-sm text-gray-500 mt-2">
+                      Supports PDF, CSV, XLSX up to 10MB
                     </p>
                   </>
                 )}
@@ -146,30 +193,48 @@ export default function DocumentUploader({ onUploadComplete }: Props) {
           </div>
         </div>
         
+        {/* Status Messages */}
         {uploadStatus === 'success' && (
-          <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-md flex items-center">
-            <FiCheck className="h-5 w-5 mr-2" />
-            <span>Document uploaded successfully!</span>
+          <div className="p-4 bg-green-50 border border-green-200 text-green-800 rounded-lg flex items-center animate-fade-in">
+            <FiCheck className="h-6 w-6 mr-3 text-green-600" />
+            <div>
+              <p className="font-medium">Upload Successful!</p>
+              <p className="text-sm text-green-700">Your document has been processed and analyzed.</p>
+            </div>
           </div>
         )}
-        
-        {uploadStatus === 'error' && (
-          <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md flex items-center">
-            <FiX className="h-5 w-5 mr-2" />
-            <span>{errorMessage || 'Error uploading document'}</span>
+
+        {uploadStatus === 'error' && errorMessage && (
+          <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-lg flex items-center animate-fade-in">
+            <FiX className="h-6 w-6 mr-3 text-red-600" />
+            <div>
+              <p className="font-medium">Upload Failed</p>
+              <p className="text-sm text-red-700">{errorMessage}</p>
+            </div>
           </div>
         )}
-        
+
+        {/* Submit Button */}
         <button
           type="submit"
           disabled={!file || isUploading}
-          className={`w-full py-2 px-4 rounded-md ${
+          className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-all duration-300 ${
             !file || isUploading
-              ? 'bg-gray-300 cursor-not-allowed'
-              : 'bg-blue-500 hover:bg-blue-600 text-white'
+              ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700 text-white hover:shadow-lg transform hover:-translate-y-0.5'
           }`}
         >
-          {isUploading ? 'Uploading...' : 'Upload Document'}
+          {isUploading ? (
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white mr-3"></div>
+              Processing Document...
+            </div>
+          ) : (
+            <div className="flex items-center justify-center">
+              <FiUpload className="mr-3 h-6 w-6" />
+              Upload & Analyze Document
+            </div>
+          )}
         </button>
       </form>
     </div>
