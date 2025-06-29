@@ -201,10 +201,13 @@ function ChatInterface() {
               {/* Sources */}
               {message.sources && message.sources.length > 0 && (
                 <div className="text-xs text-gray-500">
-                  <strong>Sources:</strong>
-                  <ul className="mt-1 ml-4 space-y-1">
-                    {message.sources.map((source, idx) => (
-                      <li key={idx} className="list-disc">{source}</li>
+                  <p className="font-semibold mb-1">Sources:</p>
+                  <ul className="space-y-1 pl-4">
+                    {message.sources.slice(0, 3).map((source, idx) => (
+                      <li key={idx} className="list-disc">
+                        {source.metadata?.filename || 'Document'} 
+                        {source.metadata?.doc_type && ` (${source.metadata.doc_type})`}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -345,58 +348,6 @@ function ChatInterface() {
                 <FaSpinner className="animate-spin" />
               ) : (
                 <FaArrowCircleRight />
-              )}
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default ChatInterface;
-                      <p className="font-semibold mb-1">Sources:</p>
-                      <ul className="space-y-1 pl-4">
-                        {message.sources.slice(0, 3).map((source, idx) => (
-                          <li key={idx} className="list-disc">
-                            {source.metadata?.filename || 'Document'} 
-                            {source.metadata?.doc_type && ` (${source.metadata.doc_type})`}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-                <div className={`text-xs text-gray-500 mt-1 ${
-                  message.sender === 'user' ? 'text-right' : 'text-left'
-                }`}>
-                  {message.timestamp.toLocaleTimeString()}
-                </div>
-              </div>
-            ))
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-        
-        <div className="p-4 border-t border-gray-200">
-          <form onSubmit={handleSubmit} className="flex">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={isLoading}
-              placeholder="Type your question here..."
-              className="form-control"
-            />
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="ml-2 bg-primary-600 hover:bg-primary-700 text-white p-2 rounded-md"
-            >
-              {isLoading ? (
-                <FaSpinner className="animate-spin h-5 w-5" />
-              ) : (
-                <FaArrowCircleRight className="h-5 w-5" />
               )}
             </button>
           </form>
