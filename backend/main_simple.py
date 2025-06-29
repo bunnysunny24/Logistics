@@ -14,7 +14,7 @@ import pandas as pd
 # Import our enhanced components
 from models.rag_model import LogisticsPulseRAG
 from pipeline.enhanced_anomaly_detector import EnhancedAnomalyDetector
-from utils.document_processor import DocumentProcessor
+from utils.document_processor import PDFProcessor
 
 # Load environment variables
 load_dotenv()
@@ -34,7 +34,7 @@ PORT = int(os.getenv("PORT", "8000"))
 try:
     rag_model = LogisticsPulseRAG()
     anomaly_detector = EnhancedAnomalyDetector(data_dir=DATA_DIR)
-    document_processor = DocumentProcessor()
+    document_processor = PDFProcessor()
     
     print("✅ All components initialized successfully")
 except Exception as e:

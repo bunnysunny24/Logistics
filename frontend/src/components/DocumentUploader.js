@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { uploadDocument } from '../lib/api';
+import apiService from '../services/api';
 import { FaUpload, FaFile, FaFileInvoice, FaTruck, FaBook, FaCheck, FaTimes } from 'react-icons/fa';
 
 function DocumentUploader({ onUploadComplete }) {
@@ -27,16 +27,21 @@ function DocumentUploader({ onUploadComplete }) {
     setErrorMessage('');
     
     try {
-      await uploadDocument(file, docType);
-      setUploadStatus('success');
-      setFile(null);
-      if (onUploadComplete) {
-        onUploadComplete();
+      const result = await apiService.uploadDocument(file);
+      
+      if (result.success) {
+        setUploadStatus('success');
+        setFile(null);
+        if (onUploadComplete) {
+          onUploadComplete(result);
+        }
+      } else {
+        throw new Error(result.message || 'Upload failed');
       }
     } catch (error) {
       console.error('Upload error:', error);
       setUploadStatus('error');
-      setErrorMessage(error.response?.data?.detail || 'Error uploading document');
+      setErrorMessage(error.message || 'Error uploading document');
     } finally {
       setIsUploading(false);
     }

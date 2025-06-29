@@ -239,9 +239,9 @@ def test_document_processor():
     print("📄 Testing document processor...")
     
     try:
-        from utils.document_processor import DocumentProcessor
+        from utils.document_processor import PDFProcessor
         
-        processor = DocumentProcessor()
+        processor = PDFProcessor()
         print("  ✅ Document processor initialized successfully")
         
         # Test with existing invoice files
@@ -285,10 +285,10 @@ def run_integration_test():
     try:
         # Test full workflow
         from pipeline.enhanced_anomaly_detector import EnhancedAnomalyDetector
-        from utils.document_processor import DocumentProcessor
+        from utils.document_processor import PDFProcessor
         
         detector = EnhancedAnomalyDetector(data_dir="./data")
-        processor = DocumentProcessor()
+        processor = PDFProcessor()
         
         # Process a document end-to-end
         data_dir = "./data"

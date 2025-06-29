@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import DocumentUploader from './components/DocumentUploader';
 import AnomalyDashboard from './components/AnomalyDashboard';
+import SystemStatusPanel from './components/SystemStatusPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
@@ -31,8 +32,13 @@ function App() {
               </div>
               
               <ErrorBoundary>
-                <div className="mb-6">
-                  <DocumentUploader onUploadComplete={handleDocumentUploaded} />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                  <div className="lg:col-span-2">
+                    <DocumentUploader onUploadComplete={handleDocumentUploaded} />
+                  </div>
+                  <div>
+                    <SystemStatusPanel />
+                  </div>
                 </div>
               </ErrorBoundary>
               

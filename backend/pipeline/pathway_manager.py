@@ -7,7 +7,7 @@ from loguru import logger
 import threading
 
 from pipeline.pathway_ingest import PathwayIngestPipeline
-from utils.document_processor import DocumentProcessor
+from utils.document_processor import PDFProcessor
 
 class PathwayManager:
     """
@@ -21,7 +21,7 @@ class PathwayManager:
         self.embeddings_model = os.environ.get("EMBEDDINGS_MODEL", "openai")
         self.pipeline_thread = None
         self.running = False
-        self.doc_processor = DocumentProcessor()
+        self.doc_processor = PDFProcessor()
         
         # Create necessary directories
         os.makedirs(f"{self.watch_dir}/index", exist_ok=True)

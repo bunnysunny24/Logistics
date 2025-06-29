@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { queryLogisticsCopilot } from '../lib/api';
+import apiService from '../services/api';
 import { FaArrowCircleRight, FaSpinner, FaLightbulb, FaHistory, FaCopy } from 'react-icons/fa';
 import CausalAnalysisDisplay from './CausalAnalysisDisplay';
 
@@ -102,7 +102,7 @@ function ChatInterface() {
     
     try {
       const startTime = Date.now();
-      const response = await queryLogisticsCopilot(newQuery);
+      const response = await apiService.submitQuery(newQuery);
       const responseTime = Date.now() - startTime;
       
       const copilotMessage = {
