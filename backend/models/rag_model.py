@@ -583,27 +583,32 @@ with a risk score of {risk_desc}.
         
         # Generate response with improved chain
         try:
-            # Use direct LLM call for better control
+    # Use direct LLM call for better control
             formatted_prompt = prompt_template.format(query=query, context=context_text)
-            
-            # Get response from LLM
-            response = self.llm.invoke(formatted_prompt)
-            
-            # Extract answer content
+    
+    # Get response from LLM - with adjusted parameters for local models
+            if is_local_llm:
+        # Local models may need different parameters
+                response = self.llm.invoke(formatted_prompt, max_new_tokens=256, temperature=0.2)
+            else:
+        # OpenAI API call
+                response = self.llm.invoke(formatted_prompt)
+    
+    # Extract answer content
             if hasattr(response, 'content'):
                 answer = response.content
             else:
                 answer = str(response)
-            
-            # Post-process answer for consistency
+    
+    # Post-process answer for consistency
             answer = self._post_process_answer(answer, query, primary_type)
-            
-            # Calculate enhanced confidence score
+    
+    # Calculate enhanced confidence score
             confidence = self._calculate_enhanced_confidence(answer, ranked_docs, query, sources_info)
-            
-            # Format sources with better information
+    
+    # Format sources with better information
             formatted_sources = self._format_enhanced_sources(sources_info[:5])
-            
+    
             return {
                 "answer": answer,
                 "sources": formatted_sources,
@@ -616,10 +621,11 @@ with a risk score of {risk_desc}.
                     "documents_ranked": len(ranked_docs),
                     "primary_type": primary_type,
                     "retrieval_method": "hybrid",
-                    "query_complexity": len(query.split())
+                    "query_complexity": len(query.split()),
+                    "model_type": "local" if is_local_llm else "openai"
                 }
             }
-            
+    
         except Exception as e:
             logger.error(f"Error in response generation: {e}")
             return self._generate_error_response(query, str(e))
@@ -668,15 +674,43 @@ with a risk score of {risk_desc}.
     
     def _generate_fallback_response(self, query):
         """Generate a response when LLM is not available"""
-        return {
-            "answer": "I'm currently running in demo mode without access to the full AI model. Please configure your OpenAI API key to get comprehensive responses about your logistics data.",
-            "sources": [],
-            "confidence": 0.1,
-            "metadata": {
-                "timestamp": datetime.now().isoformat(),
-                "mode": "fallback"
+    # Detect document types to determine appropriate response
+        doc_types = self.detect_doc_types_from_query(query)
+        primary_type = doc_types[0] if doc_types else "general"
+    
+    # Generate a more helpful response based on query type
+        if any(word in query.lower() for word in ["list", "show", "find"]):
+            return {
+                "answer": f"I understand you want information about {primary_type}. Using local models, I can index your documents but provide limited natural language responses. You can use the search functionality in the application to find specific {primary_type} data.",
+                "sources": [],
+                "confidence": 0.5,
+                "metadata": {
+                    "timestamp": datetime.now().isoformat(),
+                    "mode": "local_only",
+                    "query_type": "listing"
+                }
             }
-        }
+        elif any(word in query.lower() for word in ["why", "how", "explain"]):
+            return {
+                "answer": f"You're asking for an explanation related to {primary_type}. While using local models, detailed explanations are limited. Please check the documentation or data sources directly for this information.",
+                "sources": [],
+                "confidence": 0.5,
+                "metadata": {
+                    "timestamp": datetime.now().isoformat(),
+                    "mode": "local_only",
+                    "query_type": "explanation"
+                }
+            }
+        else:
+            return {
+                "answer": f"I've processed your query about {primary_type} using local models. Your documents have been indexed locally and the system can identify relevant content. For detailed analysis, consider using specific search terms or filters in the application interface.",
+                "sources": [],
+                "confidence": 0.5,
+                "metadata": {
+                    "timestamp": datetime.now().isoformat(),
+                    "mode": "local_only"
+                }
+            }
     
     def _generate_error_response(self, query, error_msg):
         """Generate an error response"""
