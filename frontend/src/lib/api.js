@@ -27,7 +27,7 @@ export const uploadDocument = async (file, docType, metadata = {}) => {
   formData.append('file', file);
   
   try {
-    const response = await api.post('/api/ingest', formData, {
+    const response = await api.post('/api/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
