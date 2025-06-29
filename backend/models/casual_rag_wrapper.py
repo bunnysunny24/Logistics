@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, Optional
-from .causal_rag_integration import CausalQueryHandler
+from .casual_rag_implementation import CausalQueryHandler
 
 logger = logging.getLogger(__name__)
 

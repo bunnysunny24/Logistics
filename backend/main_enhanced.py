@@ -52,6 +52,19 @@ try:
     if LogisticsPulseRAG:
         rag_model = LogisticsPulseRAG()
         print("✅ RAG model initialized successfully")
+        
+        # Initialize Causal RAG system
+        try:
+            from causal_integration import setup_causal_rag
+            causal_rag = setup_causal_rag(rag_model)
+            if causal_rag:
+                # Replace standard RAG model with causal-enhanced version
+                rag_model = causal_rag
+                print("✅ Causal RAG system initialized successfully")
+            else:
+                print("⚠️ Causal RAG system initialization failed, using standard RAG")
+        except ImportError as e:
+            print(f"⚠️ Causal RAG components not available: {e}")
     else:
         rag_model = None
         print("⚠️ RAG model not available")

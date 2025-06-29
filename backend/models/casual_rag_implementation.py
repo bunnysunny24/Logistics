@@ -12,6 +12,14 @@ class CausalQueryHandler:
     def __init__(self, rag_model, causal_engine):
         self.rag_model = rag_model
         self.causal_engine = causal_engine
+        
+        # Initialize risk-based hold system
+        self.risk_thresholds = {
+            "driver_risk": 0.7,
+            "shipment_anomaly": 0.8,
+            "invoice_anomaly": 0.75,
+            "combined_risk": 0.6
+        }
     
     def process_query(self, query: str, context: Optional[Dict] = None) -> Dict:
         """
@@ -148,7 +156,14 @@ class CausalQueryHandler:
         standard_answer = standard_response.get("answer", "")
         
         causal_insights = []
+        risk_based_holds = []
+        
         for analysis in causal_analyses:
+            # Check if there are risk-based holds associated with this entity
+            hold_info = self._check_risk_based_holds(analysis)
+            if hold_info:
+                risk_based_holds.append(hold_info)
+            
             if analysis.get("has_anomaly", False) and analysis.get("narrative"):
                 # Use the LLM-generated narrative
                 causal_insights.append(analysis["narrative"])
@@ -165,9 +180,71 @@ class CausalQueryHandler:
                     
                 causal_insights.append(insight)
         
+        combined_answer = standard_answer
+        
         if causal_insights:
             # Combine standard answer with causal insights
-            combined_answer = standard_answer + "\n\n### Root Cause Analysis\n\n" + "\n\n".join(causal_insights)
-            return combined_answer
-        else:
-            return standard_answer
+            combined_answer += "\n\n### Root Cause Analysis\n\n" + "\n\n".join(causal_insights)
+        
+        if risk_based_holds:
+            combined_answer += "\n\n### Risk-Based Holds\n\n" + "\n\n".join(risk_based_holds)
+            
+        return combined_answer
+    
+    def _check_risk_based_holds(self, analysis: Dict) -> Optional[str]:
+        """
+        Check if a risk-based hold should be applied based on causal analysis
+        
+        Args:
+            analysis: The causal analysis result
+            
+        Returns:
+            Hold information text if a hold should be applied, None otherwise
+        """
+        if not analysis.get("has_anomaly", False):
+            return None
+            
+        entity_id = analysis.get("entity_id")
+        anomaly = analysis.get("anomaly", {})
+        anomaly_type = anomaly.get("data", {}).get("anomaly_type", "")
+        
+        # Extract risk scores
+        risk_score = float(anomaly.get("data", {}).get("risk_score", 0))
+        combined_risk = risk_score
+        
+        # Check related events for driver risk
+        has_driver_risk = False
+        driver_risk_score = 0
+        driver_name = ""
+        
+        # Look for driver risk events in potential causes
+        for cause in analysis.get("potential_causes", []):
+            cause_event = cause.get("event", {})
+            if cause_event.get("event_type") == "driver_risk_update":
+                has_driver_risk = True
+                driver_risk_score = float(cause_event.get("data", {}).get("risk_score", 0))
+                driver_name = cause_event.get("data", {}).get("driver_name", "Unknown driver")
+                combined_risk = max(combined_risk, driver_risk_score * 0.9)
+                
+        # Calculate final risk score with causal weighting
+        if len(analysis.get("potential_causes", [])) > 0:
+            # If we have causal connections, increase the risk
+            combined_risk *= 1.2
+            
+        # Apply hold if threshold exceeded
+        if "invoice" in anomaly_type.lower() and combined_risk >= self.risk_thresholds["invoice_anomaly"]:
+            return f"PAYMENT HOLD on {entity_id}: Invoice flagged for manual review due to high risk score ({combined_risk:.2f})."
+            
+        elif "shipment" in anomaly_type.lower() and combined_risk >= self.risk_thresholds["shipment_anomaly"]:
+            hold_reason = f"SHIPMENT HOLD on {entity_id}: Shipment flagged due to anomaly detection ({combined_risk:.2f})."
+            if has_driver_risk:
+                hold_reason += f" Driver {driver_name} has elevated risk score ({driver_risk_score:.2f})."
+            return hold_reason
+            
+        elif has_driver_risk and driver_risk_score >= self.risk_thresholds["driver_risk"]:
+            return f"DRIVER RESTRICTION: {driver_name} has high risk score ({driver_risk_score:.2f}). Recommend limiting sensitive shipments."
+            
+        elif combined_risk >= self.risk_thresholds["combined_risk"]:
+            return f"ADVISORY HOLD on {entity_id}: Combined risk factors ({combined_risk:.2f}) suggest caution."
+            
+        return None
