@@ -134,3 +134,4 @@ The React frontend is built with modern practices:
 ## License
 
 This project is licensed under the MIT License.
+cd "d:\Bunny\logistics-pulse-copilot"; python backend/main_enhanced.py

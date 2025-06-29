@@ -835,6 +835,46 @@ with a risk score of {risk_desc}.
         
         return self.compliance_rules_cache
 
+    def add_document_to_index(self, content: str, doc_type: str, metadata: dict = None):
+        """Add a new document to the vector store index"""
+        try:
+            if not content or not doc_type:
+                logger.warning("Cannot add empty content or missing document type to index")
+                return False
+        
+            if not metadata:
+                metadata = {}
+        
+        # Create document object
+            doc = Document(
+                page_content=content,
+                metadata={
+                    "source": metadata.get("source", "unknown"),
+                    "doc_type": doc_type,
+                    "timestamp": datetime.now().isoformat(),
+                    **metadata
+                }
+            )
+        
+        # Add to appropriate vector store
+            if doc_type not in self.vector_stores:
+                # Initialize new vector store if needed
+                self.vector_stores[doc_type] = FAISS.from_documents([doc], self.embeddings)
+                logger.info(f"Created new vector store for {doc_type}")
+            else:
+            # Add to existing vector store
+                self.vector_stores[doc_type].add_documents([doc])
+                logger.info(f"Added document to existing {doc_type} vector store")
+        
+            # Update last checked time
+            self.last_checked[doc_type] = time.time()
+        
+            return True
+    
+        except Exception as e:
+            logger.error(f"Error adding document to index: {e}")
+            return False
+
     def calculate_late_fees(self, invoice_amount, days_overdue):
         """Calculate late fees based on current policy"""
         rules = self.get_current_compliance_rules()

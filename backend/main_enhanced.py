@@ -366,43 +366,51 @@ async def query_documents(query: ChatMessage):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query processing failed: {str(e)}")
 
-@app.post("/api/query") 
+@app.post("/api/query")
 async def api_query_documents(query: ChatMessage):
-    """API version of query endpoint with enhanced features"""
+    """Query documents using RAG - API version"""
     try:
-        if not rag_model:
-            return _get_mock_response(query.message)
-        
-        # Check if this is an anomaly-related query and provide direct response
-        query_lower = query.message.lower()
-        if any(term in query_lower for term in ["anomaly", "anomalies", "unusual", "suspicious", "flagged", "risk", "deviation", "issue", "problem"]):
-            return _get_mock_response(query.message)
-        
-        # Enhanced query processing with context
-        start_time = datetime.now()
-        
-        # Enhance context with anomaly information if relevant
-        enhanced_context = _enhance_query_with_anomaly_context(query.message, query.context or {})
-        
-        result = rag_model.process_query(
-            query=query.message,
-            context=enhanced_context
-        )
-        
-        # Add processing time to metadata
-        if "metadata" not in result:
-            result["metadata"] = {}
-        result["metadata"]["processing_time_ms"] = (datetime.now() - start_time).total_seconds() * 1000
-        
-        return QueryResponse(
-            answer=result["answer"],
-            sources=result["sources"], 
-            confidence=result["confidence"],
-            metadata=result["metadata"]
-        )
-        
+        # Use actual RAG model instead of mock responses
+        if rag_model:
+            result = rag_model.process_query(query.message, query.context)
+            return QueryResponse(**result)
+        else:
+            # Fallback to mock responses if RAG model isn't available
+            mock_responses = {
+                "shipment": {
+                    "answer": "Based on the shipment data, there are currently 149 delayed shipments out of 1247 total shipments. The main causes include weather delays and customs processing delays.",
+                    "sources": ["shipment_001.pdf", "logistics_report.pdf"],
+                    "confidence": 0.85
+                },
+                "invoice": {
+                    "answer": "The invoice analysis shows a total of 892 invoices with a combined amount of $2,456,789.50. There are 23 detected anomalies, primarily involving amount discrepancies.",
+                    "sources": ["invoice_summary.pdf", "financial_report.pdf"],
+                    "confidence": 0.92
+                },
+                "default": {
+                    "answer": "I found relevant information in the logistics database. The system is tracking shipments, invoices, and detecting anomalies in real-time.",
+                    "sources": ["general_data.pdf"],
+                    "confidence": 0.75
+                }
+            }
+            
+            # Simple keyword matching for demo
+            query_lower = query.message.lower()
+            if "shipment" in query_lower or "delivery" in query_lower:
+                response = mock_responses["shipment"]
+            elif "invoice" in query_lower or "payment" in query_lower:
+                response = mock_responses["invoice"]
+            else:
+                response = mock_responses["default"]
+            
+            return QueryResponse(**response)
+    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"API query failed: {str(e)}")
+        logger.error(f"Query failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Query processing failed. Error: {str(e)}"}
+        )
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -429,79 +437,64 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @app.post("/api/upload")
-async def upload_document(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    doc_type: str = "auto",
-    metadata: Optional[str] = None
-):
-    """Upload and process document with anomaly detection"""
+async def ingest_document(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+    """Ingest and process a document"""
     try:
-        if not document_processor or not anomaly_detector:
-            raise HTTPException(status_code=500, detail="Document processing components not available")
-        
-        # Parse metadata if provided
-        doc_metadata = {}
-        if metadata:
-            try:
-                doc_metadata = json.loads(metadata)
-            except json.JSONDecodeError:
-                pass
-        
-        # Save uploaded file
-        upload_dir = f"{DATA_DIR}/uploads"
+        # Save the uploaded file
+        upload_dir = os.path.join(DATA_DIR, "uploads")
         os.makedirs(upload_dir, exist_ok=True)
         
-        file_path = f"{upload_dir}/{file.filename}"
+        file_path = os.path.join(upload_dir, file.filename)
         with open(file_path, "wb") as buffer:
             content = await file.read()
             buffer.write(content)
         
-        # Detect document type if auto
-        if doc_type == "auto":
-            if "invoice" in file.filename.lower():
-                doc_type = "invoice"
-            elif "shipment" in file.filename.lower():
-                doc_type = "shipment"
-            else:
-                doc_type = "document"
+        # Determine document type based on filename
+        doc_type = "invoice" if "invoice" in file.filename.lower() else "shipment"
         
-        # Process document in background
-        background_tasks.add_task(
-            process_document_background,
-            file_path,
-            doc_type,
-            doc_metadata
-        )
-        
-        return DocumentUploadResponse(
-            success=True,
-            message=f"Document uploaded successfully and processing started",
-            document_path=file_path,
-            anomalies=[]  # Will be processed in background
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Document upload failed: {str(e)}")
-
-async def process_document_background(file_path: str, doc_type: str, metadata: Dict[str, Any]):
-    """Background task to process uploaded document"""
-    try:
-        # Extract data from document
-        if doc_type == "invoice":
-            doc_data = document_processor.extract_invoice_data(file_path)
-        elif doc_type == "shipment":
-            doc_data = document_processor.extract_shipment_data(file_path)
+        # Process the document and add to RAG index (in background to not block response)
+        if background_tasks:
+            background_tasks.add_task(process_and_index_document, file_path, doc_type)
         else:
+            # Process immediately for testing
+            process_and_index_document(file_path, doc_type)
+        
+        return {
+            "success": True,
+            "message": "Document uploaded and processing started",
+            "filename": file.filename,
+            "document_type": doc_type
+        }
+    except Exception as e:
+        logger.error(f"Failed to ingest document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to ingest document: {str(e)}")
+
+# Add this function to process and index the document
+async def process_and_index_document(file_path, doc_type):
+    try:
+        logger.info(f"Processing document: {file_path}")
+        
+        # Extract text from document
+        if file_path.lower().endswith('.pdf'):
+            # For PDF, use document processor
+            extracted_data = document_processor.extract_text_from_pdf(file_path)
+        elif file_path.lower().endswith('.txt'):
+            # For text files, read directly
+            with open(file_path, 'r', encoding='utf-8') as f:
+                extracted_data = f.read()
+        else:
+            logger.warning(f"Unsupported file type: {file_path}")
             return
         
-        # Detect anomalies
-        anomalies = anomaly_detector.process_document(file_path, doc_type, doc_data)
-        
-        print(f"Processed {file_path}: found {len(anomalies)} anomalies")
-        
+        # Add to RAG index
+        if extracted_data and rag_model:
+            logger.info(f"Adding document to RAG index: {file_path}")
+            rag_model.add_document_to_index(extracted_data, doc_type, {"source": file_path})
+        else:
+            logger.warning(f"Failed to extract data or RAG model not available")
+    
     except Exception as e:
-        print(f"Error processing document {file_path}: {e}")
+        logger.error(f"Error processing document {file_path}: {str(e)}")
 
 @app.get("/api/anomalies")
 async def get_anomalies(
