@@ -18,24 +18,24 @@ function Sidebar() {
   ];
   
   return (
-    <div className="sidebar bg-dark text-white" style={{ width: '250px', position: 'fixed', height: '100vh', left: 0, top: 0 }}>
-      <div className="d-flex flex-column h-100">
-        <div className="p-3 border-bottom border-secondary">
-          <h2 className="h5 mb-0">Logistics Pulse</h2>
+    <div className="fixed w-64 h-screen bg-gray-800 text-white">
+      <div className="flex flex-col h-full">
+        <div className="p-4 border-b border-gray-700">
+          <h2 className="text-xl font-semibold">Logistics Pulse</h2>
         </div>
         
-        <div className="p-3">
-          <ul className="nav flex-column">
+        <div className="flex-1 p-4">
+          <ul className="space-y-2">
             {navigation.map((item) => (
-              <li key={item.name} className="nav-item mb-2">
+              <li key={item.name}>
                 <a 
                   href="#" 
-                  className={`nav-link d-flex align-items-center ${
-                    item.active ? 'text-white bg-secondary rounded' : 'text-light'
+                  className={`flex items-center px-3 py-2 rounded-md ${
+                    item.active ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                   }`}
                   onClick={(e) => e.preventDefault()}
                 >
-                  <item.icon className="me-2" />
+                  <item.icon className="mr-3 h-5 w-5" />
                   {item.name}
                 </a>
               </li>
@@ -43,14 +43,14 @@ function Sidebar() {
           </ul>
         </div>
         
-        <div className="mt-auto p-3 border-top border-secondary">
-          <div className="d-flex align-items-center">
-            <div className="d-flex align-items-center justify-content-center bg-secondary rounded-circle" style={{ width: '40px', height: '40px' }}>
+        <div className="p-4 border-t border-gray-700">
+          <div className="flex items-center">
+            <div className="flex items-center justify-center bg-gray-600 rounded-full h-10 w-10">
               <FaUser />
             </div>
-            <div className="ms-3">
-              <p className="mb-0 small fw-medium">{process.env.REACT_APP_USER_NAME || 'User'}</p>
-              <p className="mb-0 small text-light opacity-75">Logistics Analyst</p>
+            <div className="ml-3">
+              <p className="text-sm font-medium">{process.env.REACT_APP_USER_NAME || 'User'}</p>
+              <p className="text-xs text-gray-400">Logistics Analyst</p>
             </div>
           </div>
         </div>

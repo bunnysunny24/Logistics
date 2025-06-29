@@ -24,36 +24,36 @@ function Header() {
   }, []);
   
   return (
-    <header className="bg-white shadow-sm border-bottom p-3">
-      <div className="d-flex justify-content-between align-items-center">
-        <h1 className="h5 mb-0">Logistics Pulse Copilot</h1>
+    <header className="bg-white shadow-sm border-b border-gray-200 px-4 py-3">
+      <div className="flex justify-between items-center">
+        <h1 className="text-lg font-medium text-gray-800">Logistics Pulse Copilot</h1>
         
-        <div className="d-flex align-items-center">
+        <div className="flex items-center">
           {loading ? (
-            <div className="text-muted small">Loading status...</div>
+            <div className="text-sm text-gray-500">Loading status...</div>
           ) : status ? (
-            <div className="d-flex align-items-center gap-4">
-              <div className="small">
-                <span className="text-muted">Documents: </span>
-                <span className="fw-medium">{status.documents_processed?.total || 0}</span>
+            <div className="flex items-center space-x-6">
+              <div className="text-sm">
+                <span className="text-gray-500">Documents: </span>
+                <span className="font-medium">{status.documents_processed?.total || 0}</span>
               </div>
               
-              <div className="small">
-                <span className="text-muted">Status: </span>
-                <span className={`fw-medium ${status.status === 'operational' ? 'text-success' : 'text-danger'}`}>
+              <div className="text-sm">
+                <span className="text-gray-500">Status: </span>
+                <span className={`font-medium ${status.status === 'operational' ? 'text-green-600' : 'text-red-600'}`}>
                   {status.status === 'operational' ? 'Online' : 'Offline'}
                 </span>
               </div>
               
-              <div className="small">
-                <span className="text-muted">Last Update: </span>
-                <span className="fw-medium">
+              <div className="text-sm">
+                <span className="text-gray-500">Last Update: </span>
+                <span className="font-medium">
                   {status.last_update ? new Date(status.last_update).toLocaleTimeString() : 'Never'}
                 </span>
               </div>
             </div>
           ) : (
-            <div className="text-danger small">Unable to fetch status</div>
+            <div className="text-sm text-red-600">Unable to fetch status</div>
           )}
         </div>
       </div>

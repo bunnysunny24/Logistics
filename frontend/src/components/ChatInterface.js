@@ -58,21 +58,21 @@ function ChatInterface() {
   };
   
   return (
-    <div className="card" style={{ height: '600px' }}>
+    <div className="card h-[600px] flex flex-col">
       <div className="card-header">
-        <h5 className="card-title mb-0">Ask Logistics Pulse Copilot</h5>
-        <p className="text-muted small mb-0">
+        <h5 className="text-lg font-medium">Ask Logistics Pulse Copilot</h5>
+        <p className="text-sm text-gray-500">
           Ask questions about invoices, shipments, compliance, or anomalies
         </p>
       </div>
       
-      <div className="card-body d-flex flex-column p-0">
-        <div className="flex-grow-1 p-3 overflow-auto scrollbar-thin" style={{ maxHeight: 'calc(600px - 140px)' }}>
+      <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 p-4 overflow-y-auto scrollbar-thin">
           {messages.length === 0 ? (
-            <div className="d-flex flex-column align-items-center justify-content-center h-100 text-muted">
+            <div className="flex flex-col items-center justify-center h-full text-gray-500">
               <p className="mb-2">No messages yet</p>
-              <p className="small">Try asking something like:</p>
-              <ul className="small mt-2">
+              <p className="text-sm">Try asking something like:</p>
+              <ul className="text-sm mt-2 space-y-1">
                 <li>"What are the late fees for invoice #123?"</li>
                 <li>"Why was Shipment #234 flagged?"</li>
                 <li>"Which suppliers offer early payment discounts?"</li>
@@ -83,25 +83,25 @@ function ChatInterface() {
             messages.map((message) => (
               <div
                 key={message.id}
-                className={`mb-3 ${
-                  message.sender === 'user' ? 'text-end' : 'text-start'
+                className={`mb-4 ${
+                  message.sender === 'user' ? 'text-right' : 'text-left'
                 }`}
               >
                 <div
-                  className={`d-inline-block p-3 rounded ${
+                  className={`inline-block p-3 rounded-lg ${
                     message.sender === 'user'
-                      ? 'bg-primary text-white'
-                      : 'bg-light text-dark'
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-100 text-gray-800'
                   }`}
                   style={{ maxWidth: '80%', textAlign: 'left' }}
                 >
                   <p className="mb-0">{message.text}</p>
                   {message.sources && message.sources.length > 0 && (
-                    <div className="mt-2 pt-2 border-top small text-muted">
-                      <p className="fw-bold mb-1">Sources:</p>
-                      <ul className="mb-0 ps-3">
+                    <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-500">
+                      <p className="font-semibold mb-1">Sources:</p>
+                      <ul className="space-y-1 pl-4">
                         {message.sources.slice(0, 3).map((source, idx) => (
-                          <li key={idx}>
+                          <li key={idx} className="list-disc">
                             {source.metadata?.filename || 'Document'} 
                             {source.metadata?.doc_type && ` (${source.metadata.doc_type})`}
                           </li>
@@ -110,8 +110,8 @@ function ChatInterface() {
                     </div>
                   )}
                 </div>
-                <div className={`small text-muted mt-1 ${
-                  message.sender === 'user' ? 'text-end' : 'text-start'
+                <div className={`text-xs text-gray-500 mt-1 ${
+                  message.sender === 'user' ? 'text-right' : 'text-left'
                 }`}>
                   {message.timestamp.toLocaleTimeString()}
                 </div>
@@ -121,8 +121,8 @@ function ChatInterface() {
           <div ref={messagesEndRef} />
         </div>
         
-        <div className="p-3 border-top">
-          <form onSubmit={handleSubmit} className="d-flex">
+        <div className="p-4 border-t border-gray-200">
+          <form onSubmit={handleSubmit} className="flex">
             <input
               type="text"
               value={input}
@@ -134,12 +134,12 @@ function ChatInterface() {
             <button
               type="submit"
               disabled={isLoading}
-              className="btn btn-primary ms-2"
+              className="ml-2 bg-primary-600 hover:bg-primary-700 text-white p-2 rounded-md"
             >
               {isLoading ? (
-                <FaSpinner className="fa-spin" />
+                <FaSpinner className="animate-spin h-5 w-5" />
               ) : (
-                <FaArrowCircleRight />
+                <FaArrowCircleRight className="h-5 w-5" />
               )}
             </button>
           </form>

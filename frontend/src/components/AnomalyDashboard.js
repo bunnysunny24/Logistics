@@ -75,30 +75,30 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
   };
   
   const getRiskLevelClass = (score) => {
-    if (score >= 0.8) return 'bg-danger text-white';
-    if (score >= 0.6) return 'bg-warning text-dark';
-    return 'bg-info text-dark';
+    if (score >= 0.8) return 'bg-red-100 text-red-800';
+    if (score >= 0.6) return 'bg-yellow-100 text-yellow-800';
+    return 'bg-blue-100 text-blue-800';
   };
   
   return (
-    <div className="card mb-4">
-      <div className="card-header d-flex justify-content-between align-items-center">
+    <div className="card">
+      <div className="card-header flex justify-between items-center">
         <div>
-          <h5 className="card-title mb-0">Anomaly Dashboard</h5>
-          <p className="text-muted small mb-0">
+          <h5 className="text-lg font-medium">Anomaly Dashboard</h5>
+          <p className="text-sm text-gray-500">
             {anomalies.length} anomalies detected
           </p>
         </div>
         
-        <div className="d-flex align-items-center gap-3">
+        <div className="flex items-center space-x-4">
           <div>
-            <label className="form-label small mb-0">
+            <label className="form-label mb-0">
               Min Risk Score
             </label>
             <select
               value={minRiskScore}
               onChange={(e) => setMinRiskScore(parseFloat(e.target.value))}
-              className="form-select form-select-sm"
+              className="form-select text-sm py-1"
             >
               <option value="0">All</option>
               <option value="0.5">Medium (0.5+)</option>
@@ -111,17 +111,15 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
       
       <div className="card-body">
         {loading ? (
-          <div className="d-flex justify-content-center align-items-center" style={{ height: '300px' }}>
-            <div className="spinner-border text-primary" role="status">
-              <span className="visually-hidden">Loading...</span>
-            </div>
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600"></div>
           </div>
         ) : (
           <>
             {chartData && (
-              <div className="mb-4">
-                <h6 className="card-subtitle mb-2">Anomaly Distribution</h6>
-                <div style={{ height: '250px' }}>
+              <div className="mb-6">
+                <h6 className="text-sm font-medium mb-2">Anomaly Distribution</h6>
+                <div className="h-64">
                   <Bar 
                     data={chartData} 
                     options={{
@@ -142,60 +140,59 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
             )}
             
             <div>
-              <h6 className="card-subtitle mb-2">Recent Anomalies</h6>
+              <h6 className="text-sm font-medium mb-2">Recent Anomalies</h6>
               
               {anomalies.length === 0 ? (
-                <div className="text-center p-4 border rounded">
-                  <FaExclamationTriangle className="mb-2" style={{ fontSize: '2rem', opacity: 0.5 }} />
-                  <p className="text-muted">No anomalies found with the current filter</p>
+                <div className="text-center p-6 border border-gray-200 rounded-lg">
+                  <FaExclamationTriangle className="mx-auto h-8 w-8 text-gray-400 mb-2" />
+                  <p className="text-gray-500">No anomalies found with the current filter</p>
                 </div>
               ) : (
-                <div className="d-flex flex-column gap-3">
+                <div className="space-y-3">
                   {anomalies.slice(0, 5).map((anomaly) => (
                     <div 
                       key={anomaly.id}
-                      className="border rounded overflow-hidden"
+                      className="border border-gray-200 rounded-lg overflow-hidden"
                     >
                       <div 
-                        className="d-flex justify-content-between align-items-center p-3 cursor-pointer hover-bg-light"
+                        className="flex justify-between items-center p-3 cursor-pointer hover:bg-gray-50"
                         onClick={() => toggleAnomaly(anomaly.id)}
-                        style={{ cursor: 'pointer' }}
                       >
-                        <div className="d-flex align-items-center">
-                          <span className={`badge me-2 ${getRiskLevelClass(anomaly.risk_score)}`}>
+                        <div className="flex items-center">
+                          <span className={`badge mr-3 ${getRiskLevelClass(anomaly.risk_score)}`}>
                             {anomaly.risk_score.toFixed(2)}
                           </span>
                           <div>
-                            <h6 className="mb-0">{anomaly.anomaly_type.replace(/_/g, ' ')}</h6>
-                            <p className="mb-0 small text-muted">
+                            <h6 className="text-sm font-medium">{anomaly.anomaly_type.replace(/_/g, ' ')}</h6>
+                            <p className="text-xs text-gray-500">
                               Document: {anomaly.document_id}
                             </p>
                           </div>
                         </div>
                         
-                        <div className="d-flex align-items-center">
-                          <span className="small text-muted me-2">
+                        <div className="flex items-center">
+                          <span className="text-xs text-gray-500 mr-2">
                             {formatTimestamp(anomaly.timestamp)}
                           </span>
                           {expandedAnomaly === anomaly.id ? (
-                            <FaChevronUp className="text-muted" />
+                            <FaChevronUp className="text-gray-400 h-4 w-4" />
                           ) : (
-                            <FaChevronDown className="text-muted" />
+                            <FaChevronDown className="text-gray-400 h-4 w-4" />
                           )}
                         </div>
                       </div>
                       
                       {expandedAnomaly === anomaly.id && (
-                        <div className="p-3 border-top bg-light">
-                          <p className="mb-2">{anomaly.description}</p>
+                        <div className="p-3 border-t border-gray-200 bg-gray-50">
+                          <p className="text-sm mb-2">{anomaly.description}</p>
                           
                           {anomaly.metadata && (
-                            <div className="small text-muted">
-                              <h6 className="mb-1">Metadata:</h6>
-                              <ul className="mb-0">
+                            <div className="text-xs text-gray-600">
+                              <h6 className="font-medium mb-1">Metadata:</h6>
+                              <ul className="space-y-1">
                                 {Object.entries(anomaly.metadata).map(([key, value]) => (
                                   <li key={key}>
-                                    <span className="fw-medium">{key}:</span>{' '}
+                                    <span className="font-medium">{key}:</span>{' '}
                                     {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                                   </li>
                                 ))}
@@ -209,7 +206,7 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
                   
                   {anomalies.length > 5 && (
                     <div className="text-center">
-                      <button className="btn btn-link text-decoration-none">
+                      <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">
                         View all {anomalies.length} anomalies
                       </button>
                     </div>
