@@ -1,0 +1,173 @@
+import re
+import logging
+from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+class CausalQueryHandler:
+    """
+    Integrates causal reasoning into the RAG model's query processing
+    """
+    
+    def __init__(self, rag_model, causal_engine):
+        self.rag_model = rag_model
+        self.causal_engine = causal_engine
+    
+    def process_query(self, query: str, context: Optional[Dict] = None) -> Dict:
+        """
+        Process a query with causal reasoning if applicable
+        
+        Args:
+            query: The user's query
+            context: Optional context information
+            
+        Returns:
+            Response dictionary
+        """
+        # Check if this is a causal query
+        if self._is_causal_query(query):
+            # Extract entity IDs from the query
+            entity_ids = self._extract_entity_ids(query)
+            
+            if entity_ids:
+                # Process with causal reasoning
+                return self._process_causal_query(query, entity_ids, context)
+        
+        # Default to standard RAG processing
+        return self.rag_model.process_query(query, context)
+    
+    def _is_causal_query(self, query: str) -> bool:
+        """
+        Determine if a query is asking for causal reasoning
+        
+        Args:
+            query: The user's query
+            
+        Returns:
+            True if the query requires causal reasoning
+        """
+        causal_terms = [
+            "why", "cause", "reason", "because", "due to", "resulted in",
+            "led to", "root cause", "trigger", "caused by", "explain why",
+            "what caused", "how did", "what led to"
+        ]
+        
+        query_lower = query.lower()
+        return any(term in query_lower for term in causal_terms)
+    
+    def _extract_entity_ids(self, query: str) -> List[str]:
+        """
+        Extract entity IDs (invoice numbers, shipment IDs) from query
+        
+        Args:
+            query: The user's query
+            
+        Returns:
+            List of entity IDs
+        """
+        entity_ids = []
+        
+        # Look for invoice patterns (e.g., INV-2025-001, #234)
+        invoice_patterns = [
+            r'INV-\d{4}-\d{3,}',  # INV-2025-001
+            r'invoice #?(\d+)',   # invoice #234 or invoice 234
+            r'invoice (\w+-\w+-\w+)'  # invoice ABC-123-XYZ
+        ]
+        
+        for pattern in invoice_patterns:
+            matches = re.findall(pattern, query, re.IGNORECASE)
+            if matches:
+                entity_ids.extend(matches)
+                
+        # Look for shipment patterns (e.g., SHP-2025-001, #12345)
+        shipment_patterns = [
+            r'SHP-\d{4}-\d{3,}',  # SHP-2025-001
+            r'shipment #?(\d+)',  # shipment #12345 or shipment 12345
+            r'shipment (\w+-\w+-\w+)'  # shipment ABC-123-XYZ
+        ]
+        
+        for pattern in shipment_patterns:
+            matches = re.findall(pattern, query, re.IGNORECASE)
+            if matches:
+                entity_ids.extend(matches)
+                
+        return entity_ids
+    
+    def _process_causal_query(self, query: str, entity_ids: List[str], context: Optional[Dict] = None) -> Dict:
+        """
+        Process a query requiring causal reasoning
+        
+        Args:
+            query: The user's query
+            entity_ids: List of entity IDs extracted from the query
+            context: Optional context information
+            
+        Returns:
+            Response dictionary
+        """
+        # Get standard RAG response
+        standard_response = self.rag_model.process_query(query, context)
+        
+        # Analyze each entity using causal engine
+        causal_analyses = []
+        for entity_id in entity_ids:
+            analysis = self.causal_engine.analyze_entity(entity_id)
+            if analysis["found"]:
+                causal_analyses.append(analysis)
+        
+        if not causal_analyses:
+            # No causal analyses found, return standard response
+            return standard_response
+        
+        # Enhance the answer with causal information
+        enhanced_answer = self._create_causal_answer(query, causal_analyses, standard_response)
+        
+        return {
+            "answer": enhanced_answer,
+            "sources": standard_response.get("sources", []),
+            "confidence": standard_response.get("confidence", 0.8),
+            "metadata": {
+                **standard_response.get("metadata", {}),
+                "causal_reasoning": True,
+                "entities_analyzed": len(causal_analyses)
+            }
+        }
+    
+    def _create_causal_answer(self, query: str, causal_analyses: List[Dict], standard_response: Dict) -> str:
+        """
+        Create an enhanced answer incorporating causal reasoning
+        
+        Args:
+            query: The user's query
+            causal_analyses: List of causal analyses
+            standard_response: Standard RAG response
+            
+        Returns:
+            Enhanced answer incorporating causal reasoning
+        """
+        standard_answer = standard_response.get("answer", "")
+        
+        causal_insights = []
+        for analysis in causal_analyses:
+            if analysis.get("has_anomaly", False) and analysis.get("narrative"):
+                # Use the LLM-generated narrative
+                causal_insights.append(analysis["narrative"])
+            elif analysis.get("has_anomaly", False) and analysis.get("potential_causes"):
+                # Create a structured explanation
+                anomaly = analysis["anomaly"]
+                causes = analysis["potential_causes"]
+                
+                insight = f"The {anomaly['data'].get('anomaly_type', 'anomaly')} for {anomaly['entity_id']} was likely caused by:\n"
+                
+                for i, cause in enumerate(causes[:2]):  # Top 2 causes
+                    cause_event = cause["event"]
+                    insight += f"- {cause_event['event_type']} ({cause['temporal_proximity']} before): {cause_event['data'].get('description', '')}\n"
+                    
+                causal_insights.append(insight)
+        
+        if causal_insights:
+            # Combine standard answer with causal insights
+            combined_answer = standard_answer + "\n\n### Root Cause Analysis\n\n" + "\n\n".join(causal_insights)
+            return combined_answer
+        else:
+            return standard_answer

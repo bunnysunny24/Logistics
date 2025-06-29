@@ -1,289 +1,393 @@
 import os
-import shutil
+import logging
+import numpy as np
 import pandas as pd
-import time
-from typing import Dict, Any, Optional, List
-from loguru import logger
 from datetime import datetime
-import json
+from typing import Dict, List, Any, Optional
+import re
 
-class DocumentProcessor:
+# Set up logging
+logger = logging.getLogger(__name__)
+
+class PDFProcessor:
     """
-    Utility class for processing different document types
+    Handles extraction of structured data from PDF documents.
+    Supports invoices, shipments, and policy documents.
     """
     
     def __init__(self):
-        self.data_dir = os.environ.get("DATA_DIR", "./data")
-        
-        # Create necessary directories
-        os.makedirs(f"{self.data_dir}/invoices", exist_ok=True)
-        os.makedirs(f"{self.data_dir}/shipments", exist_ok=True)
-        os.makedirs(f"{self.data_dir}/policies", exist_ok=True)
+        try:
+            # Import PDF processing libraries
+            import pdfplumber
+            import pytesseract
+            from PIL import Image
+            
+            self.pdfplumber = pdfplumber
+            self.pytesseract = pytesseract
+            self.Image = Image
+            self.ocr_enabled = True
+        except ImportError as e:
+            logger.warning(f"PDF OCR capabilities limited due to missing dependencies: {e}")
+            self.ocr_enabled = False
     
-    def process_document(self, document_path: str, doc_type: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def process_pdf(self, file_path: str, doc_type: str) -> Dict[str, Any]:
         """
-        Process a document and store it in the appropriate directory
-        Returns the path to the processed document
+        Extract data from PDF file based on document type
+        
+        Args:
+            file_path: Path to the PDF file
+            doc_type: Type of document (invoice, shipment, policy)
+            
+        Returns:
+            Dictionary of extracted data
         """
-        if not os.path.exists(document_path):
-            raise FileNotFoundError(f"Document not found: {document_path}")
-        
-        filename = os.path.basename(document_path)
-        extension = os.path.splitext(filename)[1].lower()
-        
-        # Determine target directory based on document type
-        if doc_type == "invoice":
-            target_dir = f"{self.data_dir}/invoices"
-        elif doc_type == "shipment":
-            target_dir = f"{self.data_dir}/shipments"
-        elif doc_type == "policy":
-            target_dir = f"{self.data_dir}/policies"
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"PDF file not found: {file_path}")
+            
+        if doc_type.lower() == "invoice":
+            return self._extract_invoice_data(file_path)
+        elif doc_type.lower() == "shipment":
+            return self._extract_shipment_data(file_path)
+        elif doc_type.lower() == "policy":
+            return self._extract_policy_data(file_path)
         else:
             raise ValueError(f"Unsupported document type: {doc_type}")
-        
-        # Generate destination path with timestamp to avoid overwrites
-        timestamp = int(time.time())
-        dest_filename = f"{os.path.splitext(filename)[0]}_{timestamp}{extension}"
-        dest_path = os.path.join(target_dir, dest_filename)
-        
-        # Process based on file type
-        if extension == ".pdf":
-            return self._process_pdf(document_path, dest_path, doc_type, metadata)
-        elif extension == ".csv":
-            return self._process_csv(document_path, dest_path, doc_type, metadata)
-        else:
-            raise ValueError(f"Unsupported file extension: {extension}")
     
-    def _process_pdf(self, source_path: str, dest_path: str, doc_type: str, metadata: Optional[Dict[str, Any]]) -> str:
-        """Process PDF document"""
+    def _extract_text_from_pdf(self, pdf_path: str) -> str:
+        """Extract all text content from PDF"""
         try:
-            # In a real implementation, we would extract text and data from the PDF
-            # For now, we'll just copy the file
-            shutil.copy2(source_path, dest_path)
+            text_content = []
+            with self.pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text() or ""
+                    text_content.append(text)
             
-            # Save metadata alongside the file
-            if metadata:
-                metadata_path = f"{os.path.splitext(dest_path)[0]}.meta.json"
-                with open(metadata_path, 'w') as f:
-                    json.dump({
-                        "doc_type": doc_type,
-                        "original_path": source_path,
-                        "processed_at": datetime.now().isoformat(),
-                        **metadata
-                    }, f, indent=2)
-            
-            logger.info(f"Processed PDF document: {dest_path}")
-            return dest_path
-        except Exception as e:
-            logger.error(f"Error processing PDF {source_path}: {e}")
-            raise
-    
-    def _process_csv(self, source_path: str, dest_path: str, doc_type: str, metadata: Optional[Dict[str, Any]]) -> str:
-        """Process CSV document"""
-        try:
-            # Read CSV file
-            df = pd.read_csv(source_path)
-            
-            # In a real implementation, we would normalize and validate the data
-            # For now, we'll just save it as-is
-            df.to_csv(dest_path, index=False)
-            
-            # Save metadata alongside the file
-            if metadata:
-                metadata_path = f"{os.path.splitext(dest_path)[0]}.meta.json"
-                with open(metadata_path, 'w') as f:
-                    json.dump({
-                        "doc_type": doc_type,
-                        "original_path": source_path,
-                        "processed_at": datetime.now().isoformat(),
-                        "row_count": len(df),
-                        "columns": df.columns.tolist(),
-                        **metadata
-                    }, f, indent=2)
-            
-            logger.info(f"Processed CSV document: {dest_path}")
-            return dest_path
-        except Exception as e:
-            logger.error(f"Error processing CSV {source_path}: {e}")
-            raise
-    
-    def _extract_text_from_pdf(self, pdf_path):
-        """Extract text content from PDF file"""
-        try:
-            import pdfminer
-            from pdfminer.high_level import extract_text
-        
-            text = extract_text(pdf_path)
-            return text
+            return "\n".join(text_content)
         except Exception as e:
             logger.error(f"Error extracting text from PDF {pdf_path}: {e}")
             return ""
-
-    def _extract_tables_from_pdf(self, pdf_path):
-        """Extract tables from PDF file"""
+    
+    def _extract_tables_from_pdf(self, pdf_path: str) -> List[pd.DataFrame]:
+        """Extract tables from PDF"""
         try:
-            import tabula
-        
-        # Read PDF into DataFrame list
-            tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True)
+            tables = []
+            with self.pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    page_tables = page.extract_tables()
+                    if page_tables:
+                        for table_data in page_tables:
+                            # Convert to DataFrame
+                            if table_data and len(table_data) > 1:  # Has header and data
+                                headers = table_data[0]
+                                data = table_data[1:]
+                                df = pd.DataFrame(data, columns=headers)
+                                tables.append(df)
+            
             return tables
         except Exception as e:
             logger.error(f"Error extracting tables from PDF {pdf_path}: {e}")
             return []
     
-    def extract_invoice_data(self, invoice_path: str) -> Dict[str, Any]:
-        """
-        Extract structured data from an invoice file
-        """
-        extension = os.path.splitext(invoice_path)[1].lower()
+    def _extract_invoice_data(self, pdf_path: str) -> Dict[str, Any]:
+        """Extract structured data from invoice PDF"""
+        # Extract text content
+        text_content = self._extract_text_from_pdf(pdf_path)
         
-        if extension == ".csv":
-            return self._extract_invoice_data_csv(invoice_path)
-        elif extension == ".pdf":
-            return self._extract_invoice_data_pdf(invoice_path)
-        else:
-            raise ValueError(f"Unsupported file extension for invoice: {extension}")
-    
-    def _extract_invoice_data_csv(self, invoice_path: str) -> Dict[str, Any]:
-        """Extract data from CSV invoice"""
-        try:
-            df = pd.read_csv(invoice_path)
-            
-            # Extract basic invoice information
-            # This is a simplified implementation
-            invoice_data = {
-                "invoice_id": df.get("invoice_id", [None])[0] or os.path.basename(invoice_path),
-                "supplier": df.get("supplier", [None])[0] or "Unknown",
-                "amount": df.get("amount", [0.0])[0] or 0.0,
-                "currency": df.get("currency", ["USD"])[0] or "USD",
-                "issue_date": df.get("issue_date", [None])[0] or "Unknown",
-                "due_date": df.get("due_date", [None])[0] or "Unknown",
-                "line_items": []
-            }
-            
-            # Extract line items if available
-            if all(col in df.columns for col in ["item", "quantity", "unit_price"]):
-                for _, row in df.iterrows():
-                    line_item = {
-                        "item": row["item"],
-                        "quantity": row["quantity"],
-                        "unit_price": row["unit_price"],
-                        "total": row.get("total", row["quantity"] * row["unit_price"])
-                    }
-                    invoice_data["line_items"].append(line_item)
-            
-            return invoice_data
-        except Exception as e:
-            logger.error(f"Error extracting data from CSV invoice {invoice_path}: {e}")
-            return {
-                "invoice_id": os.path.basename(invoice_path),
-                "error": str(e)
-            }
-    
-    def _extract_invoice_data_pdf(self, invoice_path: str) -> Dict[str, Any]:
-        """Extract data from PDF invoice"""
-        # In a real implementation, this would use OCR or PDF parsing
-        # For now, return placeholder data
-        return {
-            "invoice_id": os.path.basename(invoice_path).replace(".pdf", ""),
-            "supplier": "PDF Supplier",
-            "amount": 1000.0,
-            "currency": "USD",
-            "issue_date": datetime.now().strftime("%Y-%m-%d"),
-            "due_date": datetime.now().strftime("%Y-%m-%d"),
-            "line_items": [
-                {
-                    "item": "Sample Item 1",
-                    "quantity": 2,
-                    "unit_price": 250.0,
-                    "total": 500.0
-                },
-                {
-                    "item": "Sample Item 2",
-                    "quantity": 1,
-                    "unit_price": 500.0,
-                    "total": 500.0
-                }
-            ]
-        }
-    
-    def extract_shipment_data(self, shipment_path: str) -> Dict[str, Any]:
-        """
-        Extract structured data from a shipment file
-        """
-        extension = os.path.splitext(shipment_path)[1].lower()
+        # Extract tables
+        tables = self._extract_tables_from_pdf(pdf_path)
         
-        if extension == ".csv":
-            return self._extract_shipment_data_csv(shipment_path)
-        elif extension == ".pdf":
-            return self._extract_shipment_data_pdf(shipment_path)
-        else:
-            raise ValueError(f"Unsupported file extension for shipment: {extension}")
-    
-    def _extract_shipment_data_csv(self, shipment_path: str) -> Dict[str, Any]:
-        """Extract data from CSV shipment"""
-        try:
-            df = pd.read_csv(shipment_path)
-            
-            # Extract basic shipment information
-            # This is a simplified implementation
-            shipment_data = {
-                "shipment_id": df.get("shipment_id", [None])[0] or os.path.basename(shipment_path),
-                "origin": df.get("origin", [None])[0] or "Unknown",
-                "destination": df.get("destination", [None])[0] or "Unknown",
-                "carrier": df.get("carrier", [None])[0] or "Unknown",
-                "departure_date": df.get("departure_date", [None])[0] or "Unknown",
-                "arrival_date": df.get("arrival_date", [None])[0] or "Unknown",
-                "status": df.get("status", [None])[0] or "Unknown",
-                "items": []
-            }
-            
-            # Extract items if available
-            if all(col in df.columns for col in ["item", "quantity", "value"]):
-                for _, row in df.iterrows():
-                    item = {
-                        "item": row["item"],
-                        "quantity": row["quantity"],
-                        "value": row["value"],
-                        "weight": row.get("weight", 0.0),
-                        "dimensions": row.get("dimensions", "Unknown")
-                    }
-                    shipment_data["items"].append(item)
-            
-            return shipment_data
-        except Exception as e:
-            logger.error(f"Error extracting data from CSV shipment {shipment_path}: {e}")
-            return {
-                "shipment_id": os.path.basename(shipment_path),
-                "error": str(e)
-            }
-    
-    def _extract_shipment_data_pdf(self, shipment_path: str) -> Dict[str, Any]:
-        """Extract data from PDF shipment"""
-        # In a real implementation, this would use OCR or PDF parsing
-        # For now, return placeholder data
-        return {
-            "shipment_id": os.path.basename(shipment_path).replace(".pdf", ""),
-            "origin": "New York, USA",
-            "destination": "London, UK",
-            "carrier": "Global Shipping Inc.",
-            "departure_date": datetime.now().strftime("%Y-%m-%d"),
-            "arrival_date": (datetime.now().replace(day=datetime.now().day + 7)).strftime("%Y-%m-%d"),
-            "status": "In Transit",
-            "items": [
-                {
-                    "item": "Electronics",
-                    "quantity": 10,
-                    "value": 5000.0,
-                    "weight": 25.5,
-                    "dimensions": "60x40x30 cm"
-                },
-                {
-                    "item": "Clothing",
-                    "quantity": 50,
-                    "value": 2000.0,
-                    "weight": 15.0,
-                    "dimensions": "70x50x40 cm"
-                }
-            ]
+        # Initialize with basic metadata
+        invoice_data = {
+            "invoice_id": self._extract_invoice_id(text_content),
+            "extracted_from": os.path.basename(pdf_path),
+            "processed_at": datetime.now().isoformat()
         }
+        
+        # Extract invoice details using regex patterns
+        invoice_data.update({
+            "supplier": self._extract_pattern(text_content, r"(?:Supplier|Vendor|From):\s*([A-Za-z0-9\s.,]+)"),
+            "amount": self._extract_amount(text_content),
+            "currency": self._extract_pattern(text_content, r"(?:Currency|USD|EUR|GBP):\s*([A-Za-z]{3})") or "USD",
+            "issue_date": self._extract_date(text_content, r"(?:Issue Date|Invoice Date|Date):\s*(\d{1,4}[-/\.]\d{1,2}[-/\.]\d{1,4})"),
+            "due_date": self._extract_date(text_content, r"(?:Due Date|Payment Due|Pay Before):\s*(\d{1,4}[-/\.]\d{1,2}[-/\.]\d{1,4})"),
+            "payment_terms": self._extract_payment_terms(text_content),
+            "early_discount": self._extract_early_discount(text_content),
+            "shipment_id": self._extract_pattern(text_content, r"(?:Shipment|Delivery|Order)\s(?:ID|Number|#):\s*([A-Za-z0-9-]+)")
+        })
+        
+        # Extract line items if available
+        if tables:
+            line_items = self._extract_line_items(tables)
+            if line_items:
+                invoice_data["line_items"] = line_items
+        
+        return invoice_data
+    
+    def _extract_shipment_data(self, pdf_path: str) -> Dict[str, Any]:
+        """Extract structured data from shipment PDF"""
+        # Extract text content
+        text_content = self._extract_text_from_pdf(pdf_path)
+        
+        # Extract tables
+        tables = self._extract_tables_from_pdf(pdf_path)
+        
+        # Initialize with basic metadata
+        shipment_data = {
+            "shipment_id": self._extract_pattern(text_content, r"(?:Shipment|Tracking|Waybill)\s(?:ID|Number|#):\s*([A-Za-z0-9-]+)"),
+            "extracted_from": os.path.basename(pdf_path),
+            "processed_at": datetime.now().isoformat()
+        }
+        
+        # Extract shipment details using regex patterns
+        shipment_data.update({
+            "origin": self._extract_pattern(text_content, r"(?:Origin|From|Pickup):\s*([A-Za-z0-9\s.,]+)"),
+            "destination": self._extract_pattern(text_content, r"(?:Destination|To|Delivery):\s*([A-Za-z0-9\s.,]+)"),
+            "carrier": self._extract_pattern(text_content, r"(?:Carrier|Shipper|Provider):\s*([A-Za-z0-9\s.,]+)"),
+            "departure_date": self._extract_date(text_content, r"(?:Departure|Ship|Pickup) Date:\s*(\d{1,4}[-/\.]\d{1,2}[-/\.]\d{1,4})"),
+            "estimated_arrival": self._extract_date(text_content, r"(?:Estimated|Expected|Planned) (?:Arrival|Delivery) Date:\s*(\d{1,4}[-/\.]\d{1,2}[-/\.]\d{1,4})"),
+            "status": self._extract_shipment_status(text_content),
+            "driver_id": self._extract_pattern(text_content, r"(?:Driver|Operator)\s(?:ID|Number):\s*([A-Za-z0-9-]+)")
+        })
+        
+        # Extract items if available
+        if tables:
+            items = self._extract_shipment_items(tables)
+            if items:
+                shipment_data["items"] = items
+        
+        return shipment_data
+    
+    def _extract_policy_data(self, pdf_path: str) -> Dict[str, Any]:
+        """Extract structured data from policy PDF"""
+        # For policy documents, we primarily care about the full text content
+        text_content = self._extract_text_from_pdf(pdf_path)
+        
+        # Initialize with basic metadata
+        policy_data = {
+            "policy_id": f"policy_{int(datetime.now().timestamp())}",
+            "policy_file": os.path.basename(pdf_path),
+            "extracted_at": datetime.now().isoformat(),
+            "content": text_content
+        }
+        
+        # Try to extract policy version
+        version_match = re.search(r"(?:Version|v)[\s.:]*([0-9.]+)", text_content)
+        if version_match:
+            policy_data["version"] = version_match.group(1)
+        
+        # Try to extract policy type
+        if "payment" in text_content.lower():
+            policy_data["policy_type"] = "payment"
+        elif "shipment" in text_content.lower():
+            policy_data["policy_type"] = "shipment"
+        elif "driver" in text_content.lower():
+            policy_data["policy_type"] = "driver"
+        else:
+            policy_data["policy_type"] = "general"
+        
+        # Extract policy sections
+        policy_data["sections"] = self._extract_policy_sections(text_content)
+        
+        return policy_data
+    
+    def _extract_invoice_id(self, text: str) -> str:
+        """Extract invoice ID from text"""
+        patterns = [
+            r"Invoice\s(?:ID|Number|#):\s*([A-Za-z0-9-]+)",
+            r"Invoice\s*#\s*([A-Za-z0-9-]+)",
+            r"INV[-:]?(\d+)"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1)
+        
+        # If no match found, generate a timestamp-based ID
+        return f"INV-{int(datetime.now().timestamp())}"
+    
+    def _extract_amount(self, text: str) -> float:
+        """Extract invoice amount from text"""
+        patterns = [
+            r"(?:Total|Amount|Sum):\s*[$€£]?\s*([0-9,]+\.[0-9]{2})",
+            r"[$€£]\s*([0-9,]+\.[0-9]{2})"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                # Remove commas and convert to float
+                amount_str = match.group(1).replace(',', '')
+                try:
+                    return float(amount_str)
+                except ValueError:
+                    pass
+        
+        return 0.0
+    
+    def _extract_date(self, text: str, pattern: str) -> Optional[str]:
+        """Extract and standardize date from text"""
+        match = re.search(pattern, text)
+        if not match:
+            return None
+            
+        date_str = match.group(1)
+        
+        # Try different date formats
+        for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%d-%m-%Y', '%d/%m/%Y', '%m-%d-%Y', '%m/%d/%Y'):
+            try:
+                date_obj = datetime.strptime(date_str, fmt)
+                return date_obj.strftime('%Y-%m-%d')  # Standardize to ISO format
+            except ValueError:
+                continue
+                
+        return date_str  # Return as-is if parsing fails
+    
+    def _extract_payment_terms(self, text: str) -> str:
+        """Extract payment terms from text"""
+        patterns = [
+            r"(?:Payment Terms|Terms):\s*([A-Za-z0-9\s]+)",
+            r"NET\s?(\d+)",
+            r"(\d+)\s?days"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                terms = match.group(1).strip()
+                # Standardize common terms
+                if re.match(r'\d+', terms):
+                    return f"NET{terms}"
+                return terms
+        
+        return "NET30"  # Default if not found
+    
+    def _extract_early_discount(self, text: str) -> float:
+        """Extract early payment discount percentage"""
+        patterns = [
+            r"(?:Early Payment|Prompt Payment|Early Discount):\s*(\d+(?:\.\d+)?)%",
+            r"(\d+(?:\.\d+)?)%\s+(?:discount|off)\s+(?:if paid|for payment)\s+within"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    return float(match.group(1)) / 100.0  # Convert percentage to decimal
+                except ValueError:
+                    pass
+        
+        return 0.0  # Default if not found
+    
+    def _extract_line_items(self, tables: List[pd.DataFrame]) -> List[Dict]:
+        """Extract line items from invoice tables"""
+        line_items = []
+        
+        # Try each table
+        for df in tables:
+            # Check if this looks like a line items table
+            if set(['item', 'description', 'quantity', 'price', 'amount']).issubset(set(map(str.lower, df.columns))) or \
+               any(col.lower() in ['item', 'description', 'product'] for col in df.columns):
+                
+                # Process each row
+                for _, row in df.iterrows():
+                    item = {}
+                    
+                    # Map common column names
+                    for col in df.columns:
+                        col_lower = col.lower()
+                        if col_lower in ['item', 'description', 'product']:
+                            item['description'] = str(row[col])
+                        elif col_lower in ['quantity', 'qty']:
+                            item['quantity'] = float(row[col]) if pd.notna(row[col]) else 0
+                        elif col_lower in ['price', 'unit price', 'rate']:
+                            item['unit_price'] = float(row[col]) if pd.notna(row[col]) else 0
+                        elif col_lower in ['amount', 'total', 'line total']:
+                            item['amount'] = float(row[col]) if pd.notna(row[col]) else 0
+                    
+                    if item:
+                        line_items.append(item)
+        
+        return line_items
+    
+    def _extract_shipment_status(self, text: str) -> str:
+        """Extract shipment status from text"""
+        status_patterns = {
+            'delivered': r'(?:Delivered|Completed|Received)',
+            'in_transit': r'(?:In Transit|On Route|In Progress)',
+            'pending': r'(?:Pending|Waiting|Scheduled)',
+            'delayed': r'(?:Delayed|Late|Behind Schedule)',
+            'exception': r'(?:Exception|Problem|Issue|Missing)'
+        }
+        
+        for status, pattern in status_patterns.items():
+            if re.search(pattern, text, re.IGNORECASE):
+                return status
+        
+        return 'unknown'  # Default if no status found
+    
+    def _extract_shipment_items(self, tables: List[pd.DataFrame]) -> List[Dict]:
+        """Extract items from shipment tables"""
+        items = []
+        
+        # Try each table
+        for df in tables:
+            # Check if this looks like a shipment items table
+            if any(col.lower() in ['item', 'product', 'goods'] for col in df.columns):
+                
+                # Process each row
+                for _, row in df.iterrows():
+                    item = {}
+                    
+                    # Map common column names
+                    for col in df.columns:
+                        col_lower = col.lower()
+                        if col_lower in ['item', 'product', 'goods', 'description']:
+                            item['item'] = str(row[col])
+                        elif col_lower in ['quantity', 'qty', 'count']:
+                            item['quantity'] = float(row[col]) if pd.notna(row[col]) else 0
+                        elif col_lower in ['value', 'price', 'worth']:
+                            item['value'] = float(row[col]) if pd.notna(row[col]) else 0
+                        elif col_lower in ['weight', 'kg', 'lb']:
+                            item['weight'] = float(row[col]) if pd.notna(row[col]) else 0
+                        elif col_lower in ['dimensions', 'size', 'measurements']:
+                            item['dimensions'] = str(row[col])
+                    
+                    if item and 'item' in item:
+                        items.append(item)
+        
+        return items
+    
+    def _extract_pattern(self, text: str, pattern: str) -> Optional[str]:
+        """Extract text matching a regex pattern"""
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else None
+    
+    def _extract_policy_sections(self, text: str) -> Dict[str, str]:
+        """Extract policy sections based on headers"""
+        sections = {}
+        
+        # Split by common section headers
+        headers = re.findall(r'^#+\s+(.*?)$|^([A-Z][A-Za-z\s]+):$', text, re.MULTILINE)
+        
+        if headers:
+            # Extract header titles
+            header_titles = [h[0] or h[1] for h in headers if h[0] or h[1]]
+            
+            # Get content between headers
+            content_blocks = re.split(r'^#+\s+.*?$|^[A-Z][A-Za-z\s]+:$', text, flags=re.MULTILINE)
+            
+            # Skip the first block if it's empty (before first header)
+            if content_blocks and not content_blocks[0].strip():
+                content_blocks = content_blocks[1:]
+                
+            # Map headers to content
+            for i, title in enumerate(header_titles):
+                if i < len(content_blocks):
+                    sections[title.strip()] = content_blocks[i].strip()
+        
+        # If no sections found, include full text as single section
+        if not sections:
+            sections["Full Content"] = text
+            
+        return sections

@@ -1,8 +1,7 @@
 import time
 from datetime import datetime
 import logging
-from typing import Dict, List, Any, Optional, Tuple
-import numpy as np
+from typing import Dict, List, Any, Optional
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
