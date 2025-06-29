@@ -1,243 +1,194 @@
-from langchain.chains import RetrievalQA
-from langchain_core.documents import Document
-from langchain_core.prompts import PromptTemplate
-from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import LLMChainExtractor
-
 import os
-import json
-from typing import Dict, Any, List, Optional
-from loguru import logger
+import time
 from datetime import datetime
+from typing import Dict, List, Any, Optional
+from langchain.llms import OpenAI
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+from langchain.memory import ConversationBufferMemory
+from loguru import logger
 
 class LogisticsPulseRAG:
-    """
-    RAG model for Logistics Pulse Copilot
-    Uses LangChain to create a retrieval-based Q&A system
-    """
-    
     def __init__(self):
-        # Initialize configuration from environment variables
-        self.index_dir = os.environ.get("INDEX_DIR", "./data/index")
-        self.prompts_dir = os.environ.get("PROMPTS_DIR", "./prompts")
+        # Load environment variables
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.llm_model = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+        self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
+        self.index_dir = os.getenv("INDEX_DIR", "./data/index")
         
-        # Initialize embedding model
-        self.embeddings = self._initialize_embeddings()
+        # Initialize components
+        self.llm = OpenAI(temperature=0.2, model_name=self.llm_model)
+        self.embeddings = OpenAIEmbeddings(model=self.embedding_model)
         
-        # Initialize LLM
-        self.llm = self._initialize_llm()
+        # Load prompts
+        self.load_prompts()
         
-        # Initialize vector store and retriever
-        self.vector_store = self._initialize_vector_store()
-        self.retriever = self._initialize_retriever()
-        
-        # Initialize QA chain
-        self.qa_chain = self._initialize_qa_chain()
-        
-        # Track usage statistics
-        self.query_count = 0
-        self.last_query_time = None
-    
-    def _initialize_embeddings(self):
-        """Initialize the embedding model"""
-        # Use OpenAI embeddings by default
-        embedding_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-ada-002")
-        openai_api_key = os.environ.get("OPENAI_API_KEY")
-        
-        if not openai_api_key:
-            logger.warning("OPENAI_API_KEY not set. Using fake embeddings for demo purposes.")
-            # In a real implementation, you might use a local embedding model
-            # For now, we'll just return a simple embedding function
-            from langchain_community.embeddings import FakeEmbeddings
-            return FakeEmbeddings(size=1536)
-        
-        return OpenAIEmbeddings(model=embedding_model)
-    
-    def _initialize_llm(self):
-        """Initialize the language model"""
-        # Use ChatGPT by default
-        model_name = os.environ.get("LLM_MODEL", "gpt-3.5-turbo")
-        openai_api_key = os.environ.get("OPENAI_API_KEY")
-        
-        if not openai_api_key:
-            logger.warning("OPENAI_API_KEY not set. Using fake LLM for demo purposes.")
-            # In a real implementation, you might use a local LLM
-            # For now, we'll just return a simple LLM that echoes the prompt
-            from langchain_community.llms import FakeListLLM
-            return FakeListLLM(responses=["This is a demo response from the Logistics Pulse Copilot."])
-        
-        return ChatOpenAI(model_name=model_name, temperature=0.2)
-    
-    def _initialize_vector_store(self):
-        """Initialize the vector store from saved index"""
-        # Check if index exists
-        if not os.path.exists(f"{self.index_dir}/chunks.jsonl"):
-            logger.warning(f"Index file not found at {self.index_dir}/chunks.jsonl")
-            # Create an empty vector store
-            return FAISS.from_texts(["Placeholder document"], self.embeddings)
-        
-        # Load documents from the index
-        documents = []
-        try:
-            with open(f"{self.index_dir}/chunks.jsonl", 'r') as f:
-                for line in f:
-                    data = json.loads(line)
-                    doc = Document(
-                        page_content=data.get("content", ""),
-                        metadata=data.get("metadata", {})
-                    )
-                    documents.append(doc)
-            
-            # Create vector store from documents
-            return FAISS.from_documents(documents, self.embeddings)
-        except Exception as e:
-            logger.error(f"Error loading vector store: {e}")
-            # Create an empty vector store
-            return FAISS.from_texts(["Error loading documents"], self.embeddings)
-    
-    def _initialize_retriever(self):
-        """Initialize the retriever with contextual compression"""
-        base_retriever = self.vector_store.as_retriever(search_kwargs={"k": 10})
-        
-        # Add contextual compression to improve relevance
-        compressor = LLMChainExtractor.from_llm(self.llm)
-        return ContextualCompressionRetriever(
-            base_compressor=compressor,
-            base_retriever=base_retriever
+        # Initialize conversation memory
+        self.memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            input_key="query",
+            output_key="result",
+            return_messages=True
         )
+        
+        # Initialize vector store cache with timestamps
+        self.vector_stores = {}
+        self.last_checked = {}
+        self.refresh_interval = 30  # seconds
+        
+    def load_prompts(self):
+        """Load prompt templates from files"""
+        self.prompt_templates = {
+            "invoice": {
+                "system": open("prompts/invoice_compliance_prompt.py").read(),
+                "query": open("prompts/invoice_compliance_prompt.py").read(),
+            },
+            "shipment": {
+                "system": open("prompts/shipment_anomaly_prompt.py").read(),
+                "query": open("prompts/shipment_anomaly_prompt.py").read(),
+            },
+            "general": {
+                "system": "You are LogisticsPulse, an AI assistant specialized in logistics operations.",
+                "query": "Based on the retrieved context, answer the following query: {query}\n\nContext: {context}"
+            }
+        }
     
-    def _get_prompt_template(self, query_type=None):
-        """Get the appropriate prompt template based on query type"""
-        if not query_type:
-            # Try to infer query type from query content
-            query_type = "general"
+    def get_vector_store(self, doc_type):
+        """Get vector store for a document type, refreshing if needed"""
+        current_time = time.time()
         
-        # Check if prompt template file exists
-        template_path = f"{self.prompts_dir}/{query_type}_prompt.txt"
-        if not os.path.exists(template_path):
-            logger.warning(f"Prompt template not found: {template_path}")
-            # Use default template
-            template = """
-            You are Logistics Pulse Copilot, an AI assistant for logistics and finance professionals.
+        # Check if we need to refresh the vector store
+        if (doc_type not in self.vector_stores or 
+            doc_type not in self.last_checked or
+            current_time - self.last_checked[doc_type] > self.refresh_interval):
             
-            Context information is below:
-            ----------------
-            {context}
-            ----------------
+            # Path to the vector store
+            store_path = os.path.join(self.index_dir, doc_type)
             
-            Given the context information and not prior knowledge, answer the question: {question}
+            # Check if the vector store exists
+            if os.path.exists(store_path):
+                try:
+                    # Load the vector store
+                    self.vector_stores[doc_type] = FAISS.load_local(
+                        store_path, self.embeddings
+                    )
+                    logger.info(f"Refreshed vector store for {doc_type}")
+                except Exception as e:
+                    logger.error(f"Error loading vector store for {doc_type}: {e}")
+                    return None
+            else:
+                logger.warning(f"Vector store for {doc_type} does not exist")
+                return None
             
-            Provide a detailed response that directly addresses the question. If the answer cannot be found in the context,
-            say "I don't have enough information to answer this question." Do not make up information.
-            
-            For compliance questions, cite specific clauses or policies.
-            For anomaly questions, explain the risk factors and reasons for flagging.
-            """
-            return PromptTemplate(
-                template=template,
-                input_variables=["context", "question"]
-            )
+            # Update the last checked time
+            self.last_checked[doc_type] = current_time
         
-        # Load template from file
-        try:
-            with open(template_path, 'r') as f:
-                template = f.read()
-            
-            return PromptTemplate(
-                template=template,
-                input_variables=["context", "question"]
-            )
-        except Exception as e:
-            logger.error(f"Error loading prompt template: {e}")
-            # Use simple template
-            template = "{context}\n\nQuestion: {question}\n\nAnswer:"
-            return PromptTemplate(
-                template=template,
-                input_variables=["context", "question"]
-            )
+        return self.vector_stores.get(doc_type)
     
-    def _initialize_qa_chain(self):
-        """Initialize the QA chain"""
-        prompt = self._get_prompt_template()
+    def detect_doc_types_from_query(self, query):
+        """Detect document types relevant to the query"""
+        query_lower = query.lower()
         
-        return RetrievalQA.from_chain_type(
+        doc_types = []
+        
+        # Check for invoice-related terms
+        if any(term in query_lower for term in ["invoice", "payment", "discount", "late fee", "compliance", "due date"]):
+            doc_types.append("invoice")
+        
+        # Check for shipment-related terms
+        if any(term in query_lower for term in ["shipment", "route", "delivery", "tracking", "anomaly", "freight"]):
+            doc_types.append("shipment")
+        
+        # Add policy if we're asking about rules
+        if any(term in query_lower for term in ["policy", "rule", "guideline", "procedure", "protocol"]):
+            doc_types.append("policy")
+        
+        # If no specific types detected, search all
+        if not doc_types:
+            doc_types = ["invoice", "shipment", "policy"]
+        
+        return doc_types
+    
+    def process_query(self, query, context=None):
+        """Process a natural language query and return answer with sources"""
+        # Initialize context if None
+        if context is None:
+            context = {}
+        
+        # Detect relevant document types
+        doc_types = self.detect_doc_types_from_query(query)
+        logger.info(f"Detected document types: {doc_types}")
+        
+        # Get combined results from all relevant document types
+        combined_docs = []
+        for doc_type in doc_types:
+            vector_store = self.get_vector_store(doc_type)
+            if vector_store:
+                # Search for relevant documents
+                docs = vector_store.similarity_search_with_score(query, k=5)
+                # Filter out low relevance documents (score > 0.6)
+                docs = [doc for doc, score in docs if score < 0.6]
+                combined_docs.extend(docs)
+        
+        # If no relevant documents found
+        if not combined_docs:
+            return {
+                "answer": "I couldn't find any relevant information to answer your question. Please try rephrasing or ask about a different topic.",
+                "sources": [],
+                "metadata": {"timestamp": datetime.now().isoformat()}
+            }
+        
+        # Determine the primary document type
+        primary_type = doc_types[0] if doc_types else "general"
+        
+        # Create prompt
+        prompt_template = PromptTemplate(
+            input_variables=["query", "context"],
+            template=self.prompt_templates[primary_type]["query"]
+        )
+        
+        # Create retrieval QA chain
+        qa_chain = RetrievalQA.from_chain_type(
             llm=self.llm,
             chain_type="stuff",
-            retriever=self.retriever,
+            retriever=vector_store.as_retriever(),
             chain_type_kwargs={
-                "prompt": prompt,
-                "verbose": True
+                "prompt": prompt_template,
+                "memory": self.memory
             },
             return_source_documents=True
         )
-    
-    def _determine_query_type(self, query):
-        """Determine the type of query to use the appropriate prompt template"""
-        query_lower = query.lower()
         
-        if "invoice" in query_lower or "payment" in query_lower or "fee" in query_lower or "due date" in query_lower:
-            return "invoice"
-        elif "shipment" in query_lower or "route" in query_lower or "delivery" in query_lower or "anomaly" in query_lower:
-            return "shipment"
-        else:
-            return "general"
-    
-    def process_query(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Process a natural language query and return the answer with sources
-        """
-        try:
-            # Update statistics
-            self.query_count += 1
-            self.last_query_time = datetime.now().isoformat()
-            
-            # Determine query type
-            query_type = self._determine_query_type(query)
-            
-            # Get appropriate prompt template
-            prompt = self._get_prompt_template(query_type)
-            
-            # Update chain with new prompt
-            self.qa_chain.combine_documents_chain.llm_chain.prompt = prompt
-            
-            # Process the query
-            result = self.qa_chain({"query": query})
-            
-            # Extract sources
-            sources = []
-            for doc in result.get("source_documents", []):
-                source = {
-                    "content": doc.page_content,
-                    "metadata": doc.metadata
-                }
-                sources.append(source)
-            
-            # Prepare response
-            response = {
-                "answer": result.get("result", "No answer found."),
-                "sources": sources,
-                "metadata": {
-                    "query_type": query_type,
-                    "timestamp": datetime.now().isoformat(),
-                    "model": os.environ.get("LLM_MODEL", "gpt-3.5-turbo")
-                }
-            }
-            
-            return response
-        except Exception as e:
-            logger.error(f"Error processing query: {e}")
-            raise
-    
-    def get_status(self) -> Dict[str, Any]:
-        """
-        Get the status of the RAG model
-        """
+        # Execute the chain
+        result = qa_chain({"query": query})
+        
+        # Format sources
+        sources = []
+        for doc in result.get("source_documents", []):
+            sources.append({
+                "content": doc.page_content,
+                "metadata": doc.metadata
+            })
+        
+        # Return formatted response
         return {
-            "query_count": self.query_count,
-            "last_query_time": self.last_query_time,
-            "vector_store_documents": self.vector_store._index.ntotal if hasattr(self.vector_store, "_index") else 0,
-            "embeddings_model": os.environ.get("EMBEDDING_MODEL", "text-embedding-ada-002"),
-            "llm_model": os.environ.get("LLM_MODEL", "gpt-3.5-turbo")
+            "answer": result["result"],
+            "sources": sources,
+            "metadata": {
+                "timestamp": datetime.now().isoformat(),
+                "doc_types": doc_types,
+                "query_time_ms": context.get("query_time_ms", 0)
+            }
+        }
+    
+    def get_status(self):
+        """Get status of the RAG model"""
+        return {
+            "model": self.llm_model,
+            "embedding_model": self.embedding_model,
+            "vector_stores": list(self.vector_stores.keys()),
+            "last_checked": {k: datetime.fromtimestamp(v).isoformat() for k, v in self.last_checked.items()},
+            "conversation_turns": len(self.memory.chat_memory.messages) // 2  # Each turn is a user message and AI response
         }
