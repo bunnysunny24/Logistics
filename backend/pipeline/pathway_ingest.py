@@ -1,264 +1,314 @@
 import pathway as pw
-from pathway.stdlib.ml.index import KNNIndex
 import os
 import time
-from typing import Dict, Any, List, Optional, Tuple
 from loguru import logger
-import json
 from datetime import datetime
+import json
 
 class PathwayIngestPipeline:
     """
     Pathway pipeline for ingesting documents and detecting changes
     """
     
-    def __init__(
-        self,
-        watch_dir: str,
-        embeddings_model: str,
-        vector_dimensions: int = 1536,  # Default for OpenAI embeddings
-        index_refresh_rate_s: int = 10
-    ):
+    def __init__(self, watch_dir, embeddings_model):
         self.watch_dir = watch_dir
         self.embeddings_model = embeddings_model
-        self.vector_dimensions = vector_dimensions
-        self.index_refresh_rate_s = index_refresh_rate_s
-        self.document_stats = {}
-        self.anomalies = []
-        
+        self.input_dirs = {
+            "invoice": f"{watch_dir}/invoices",
+            "shipment": f"{watch_dir}/shipments",
+            "policy": f"{watch_dir}/policies"
+        }
+        self.output_dir = f"{watch_dir}/index"
+        self.anomalies_dir = f"{watch_dir}/anomalies"
+        self.poll_interval_seconds = 5  # Check for changes every 5 seconds
+    
     def build_pipeline(self):
-        """
-        Build the Pathway data processing pipeline
-        """
-        # Create a schema for the document chunks
-        class DocumentSchema(pw.Schema):
-            id: str
-            content: str
-            metadata: Dict[str, Any]
-            embedding: Optional[List[float]]
-            timestamp: float
+        """Build the Pathway pipeline"""
+        # Create input connectors for each document type
+        input_connectors = {}
+        for doc_type, dir_path in self.input_dirs.items():
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
             
-        # Create a schema for anomaly detection
-        class AnomalySchema(pw.Schema):
-            id: str
-            document_id: str
-            anomaly_type: str
-            risk_score: float
-            description: str
-            timestamp: float
-            metadata: Dict[str, Any]
+            input_connectors[doc_type] = pw.io.fs.read(
+                dir_path,
+                format="csv",
+                mode="streaming",
+                poll_interval_seconds=self.poll_interval_seconds,
+                with_metadata=True
+            )
         
-        # Set up document monitoring
-        csv_table = pw.io.fs.read(
-            self.watch_dir + "/**/*.csv",
-            format="csv",
+        # Special case for policy documents
+        policy_connector = pw.io.fs.read(
+            self.input_dirs["policy"],
+            format="plaintext",
             mode="streaming",
+            poll_interval_seconds=self.poll_interval_seconds,
             with_metadata=True
         )
         
-        pdf_table = pw.io.fs.read(
-            self.watch_dir + "/**/*.pdf",
-            format="binary",
-            mode="streaming",
-            with_metadata=True
+        # Process each document type
+        processed_tables = {}
+        for doc_type, connector in input_connectors.items():
+            processed = self._process_document_table(connector, doc_type)
+            processed_tables[doc_type] = processed
+        
+        # Process policy documents
+        policy_processed = self._process_policy_table(policy_connector)
+        processed_tables["policy"] = policy_processed
+        
+        # Combine all processed documents
+        all_docs = pw.Table.concat(*list(processed_tables.values()))
+        
+        # Index documents for retrieval
+        self._index_documents(all_docs)
+        
+        # Run anomaly detection on relevant document types
+        if "invoice" in processed_tables:
+            self._detect_invoice_anomalies(processed_tables["invoice"])
+        if "shipment" in processed_tables:
+            self._detect_shipment_anomalies(processed_tables["shipment"])
+    
+    def _process_document_table(self, table, doc_type):
+        """Process a document table based on its type"""
+        # Add document type metadata
+        table = table.select(
+            pw.this.data,
+            doc_type=pw.lit(doc_type),
+            **pw.this.metadata
         )
         
-        # Process and extract text from PDFs
-        pdf_docs = pdf_table.select(
-            id=pw.this["_pw_metadata"]["path"],
-            content=self._extract_pdf_text(pw.this["_pw_raw"]),
-            metadata=self._extract_pdf_metadata(pw.this["_pw_metadata"]),
-            timestamp=pw.this["_pw_metadata"]["mtime"]
+        # Handle CSV data
+        return table.select(
+            # Extract content for embedding
+            content=self._extract_content_for_doc_type(pw.this.data, doc_type),
+            metadata=pw.declare_type(dict, pw.dict(
+                doc_type=pw.this.doc_type,
+                filename=pw.this.metadata.filename,
+                last_modified=pw.this.metadata.last_modified,
+                **pw.this.data
+            ))
         )
-        
-        # Process CSV files
-        csv_docs = csv_table.select(
-            id=pw.this["_pw_metadata"]["path"],
-            content=self._convert_csv_to_text(pw.this),
-            metadata=self._extract_csv_metadata(pw.this["_pw_metadata"]),
-            timestamp=pw.this["_pw_metadata"]["mtime"]
+    
+    def _process_policy_table(self, table):
+        """Process policy documents (markdown/text files)"""
+        # Split documents into chunks
+        return table.select(
+            content=pw.this.data,
+            metadata=pw.declare_type(dict, pw.dict(
+                doc_type=pw.lit("policy"),
+                filename=pw.this.metadata.filename,
+                last_modified=pw.this.metadata.last_modified
+            ))
         )
-        
-        # Combine document sources
-        all_docs = pw.concat(pdf_docs, csv_docs)
-        
-        # Chunk documents into smaller pieces
-        chunked_docs = all_docs.select(
-            chunks=self._chunk_document(pw.this.content, pw.this.id, pw.this.metadata, pw.this.timestamp)
-        ).flatten(pw.this.chunks)
-        
-        # Create embeddings for the chunks
-        embedded_chunks = chunked_docs.select(
-            id=pw.this.id,
+    
+    def _extract_content_for_doc_type(self, data, doc_type):
+        """Extract content from document data based on type"""
+        if doc_type == "invoice":
+            # For invoices, include key fields in the content
+            return pw.apply(
+                lambda x: f"Invoice {x.get('invoice_id', 'Unknown')}\n"
+                         f"Supplier: {x.get('supplier', 'Unknown')}\n"
+                         f"Amount: {x.get('amount', 'Unknown')}\n"
+                         f"Issue Date: {x.get('issue_date', 'Unknown')}\n"
+                         f"Due Date: {x.get('due_date', 'Unknown')}\n"
+                         f"Payment Terms: {x.get('payment_terms', 'Unknown')}\n",
+                data
+            )
+        elif doc_type == "shipment":
+            # For shipments, include key fields in the content
+            return pw.apply(
+                lambda x: f"Shipment {x.get('shipment_id', 'Unknown')}\n"
+                         f"Origin: {x.get('origin', 'Unknown')}\n"
+                         f"Destination: {x.get('destination', 'Unknown')}\n"
+                         f"Carrier: {x.get('carrier', 'Unknown')}\n"
+                         f"Status: {x.get('status', 'Unknown')}\n",
+                data
+            )
+        else:
+            # Default extraction
+            return pw.apply(str, data)
+    
+    def _index_documents(self, documents):
+        """Index documents for retrieval"""
+        # Write documents to the index directory
+        documents.select(
             content=pw.this.content,
-            metadata=pw.this.metadata,
-            timestamp=pw.this.timestamp,
-            embedding=self._compute_embedding(pw.this.content)
+            metadata=pw.this.metadata
+        ).with_universe_id().select(
+            pw.this.universe_id,
+            content=pw.this.content,
+            metadata=pw.this.metadata
+        ).write(
+            pw.io.jsonlines.write(
+                f"{self.output_dir}/chunks.jsonl",
+                append=False  # Overwrite existing file
+            )
         )
         
-        # Create vector index
-        index = KNNIndex(
-            embedded_chunks,
-            vector_column_name="embedding",
-            dimensions=self.vector_dimensions,
-            distance_type="cosine"
-        )
-        
-        # Export the index
-        pw.io.jsonl.write(
-            embedded_chunks,
-            self.watch_dir + "/index/chunks.jsonl"
-        )
-        
-        # Run anomaly detection on the documents
-        anomalies = self._detect_anomalies(all_docs)
-        
-        # Export anomalies
-        pw.io.jsonl.write(
-            anomalies,
-            self.watch_dir + "/anomalies/detected.jsonl"
-        )
-        
-        # Compute document statistics
-        doc_stats = all_docs.groupby(doc_type=pw.this.metadata["doc_type"]).reduce(
+        # Update stats
+        documents.groupby(pw.this.metadata.doc_type).reduce(
+            doc_type=pw.this.metadata.doc_type,
             count=pw.reducers.count(),
-            latest_update=pw.reducers.max(pw.this.timestamp)
+            latest_update=pw.reducers.max(pw.apply(
+                lambda x: int(time.time()),
+                pw.this.metadata
+            ))
+        ).write(
+            pw.io.jsonlines.write(
+                f"{self.watch_dir}/stats/document_stats.jsonl",
+                append=False  # Overwrite existing file
+            )
+        )
+    
+    def _detect_invoice_anomalies(self, invoices):
+        """Detect anomalies in invoices"""
+        # Implement anomaly detection logic
+        # Example: Detect late payment issues
+        anomalies = invoices.select(
+            pw.this.content,
+            data=pw.this.metadata,
+        ).filter(
+            lambda x: self._check_invoice_compliance(x.data)
+        ).select(
+            id=pw.apply(lambda x: f"ANM-INV-{int(time.time())}", pw.this.data),
+            document_id=pw.this.data.invoice_id,
+            anomaly_type=pw.lit("payment_terms_noncompliance"),
+            description=pw.apply(self._generate_invoice_anomaly_description, pw.this.data),
+            risk_score=pw.apply(lambda x: 0.8, pw.this.data),  # High risk for non-compliance
+            timestamp=pw.apply(lambda x: int(time.time()), pw.this.data),
+            metadata=pw.this.data
         )
         
-        # Export statistics
-        pw.io.jsonl.write(
-            doc_stats,
-            self.watch_dir + "/stats/document_stats.jsonl"
+        # Write anomalies to output
+        self._write_anomalies(anomalies)
+    
+    def _detect_shipment_anomalies(self, shipments):
+        """Detect anomalies in shipments"""
+        # Implement anomaly detection logic
+        # Example: Detect route deviations
+        anomalies = shipments.select(
+            pw.this.content,
+            data=pw.this.metadata,
+        ).filter(
+            lambda x: self._check_shipment_anomalies(x.data)
+        ).select(
+            id=pw.apply(lambda x: f"ANM-SHP-{int(time.time())}", pw.this.data),
+            document_id=pw.this.data.shipment_id,
+            anomaly_type=pw.apply(self._determine_anomaly_type, pw.this.data),
+            description=pw.apply(self._generate_shipment_anomaly_description, pw.this.data),
+            risk_score=pw.apply(self._calculate_risk_score, pw.this.data),
+            timestamp=pw.apply(lambda x: int(time.time()), pw.this.data),
+            metadata=pw.this.data
         )
         
-        return index
+        # Write anomalies to output
+        self._write_anomalies(anomalies)
     
-    def _extract_pdf_text(self, pdf_data) -> str:
-        """Extract text from PDF binary data"""
-        # This would use PyMuPDF or pdfplumber in a real implementation
-        # For now, we'll just return a placeholder
-        return f"PDF text extracted at {time.time()}"
+    def _write_anomalies(self, anomalies):
+        """Write anomalies to output file"""
+        anomalies.write(
+            pw.io.jsonlines.write(
+                f"{self.anomalies_dir}/detected.jsonl",
+                append=True  # Append to existing file
+            )
+        )
     
-    def _extract_pdf_metadata(self, metadata) -> Dict[str, Any]:
-        """Extract metadata from PDF file"""
-        path = metadata["path"]
-        filename = os.path.basename(path)
-        
-        result = {
-            "doc_type": "unknown",
-            "filename": filename,
-            "path": path,
-            "created_at": metadata.get("ctime", time.time()),
-            "modified_at": metadata.get("mtime", time.time()),
-        }
-        
-        # Determine document type based on filename patterns
-        if "invoice" in filename.lower():
-            result["doc_type"] = "invoice"
-        elif "payout" in filename.lower() or "rules" in filename.lower():
-            result["doc_type"] = "policy"
-        elif "shipment" in filename.lower():
-            result["doc_type"] = "shipment"
+    # Helper methods for anomaly detection
+    def _check_invoice_compliance(self, invoice_data):
+        """Check if an invoice is compliant with payment terms"""
+        try:
+            payment_terms = invoice_data.get("payment_terms", "")
+            if not payment_terms.startswith("NET"):
+                return False
             
-        return result
-    
-    def _convert_csv_to_text(self, csv_data) -> str:
-        """Convert CSV data to text representation"""
-        # In a real implementation, this would parse the CSV properly
-        rows = []
-        for key, value in csv_data.items():
-            if not key.startswith("_pw_"):
-                rows.append(f"{key}: {value}")
-        
-        return "\n".join(rows)
-    
-    def _extract_csv_metadata(self, metadata) -> Dict[str, Any]:
-        """Extract metadata from CSV file"""
-        path = metadata["path"]
-        filename = os.path.basename(path)
-        
-        result = {
-            "doc_type": "unknown",
-            "filename": filename,
-            "path": path,
-            "created_at": metadata.get("ctime", time.time()),
-            "modified_at": metadata.get("mtime", time.time()),
-        }
-        
-        # Determine document type based on filename patterns
-        if "invoice" in filename.lower():
-            result["doc_type"] = "invoice"
-        elif "shipment" in filename.lower():
-            result["doc_type"] = "shipment"
+            expected_days = int(payment_terms.replace("NET", ""))
+            issue_date = invoice_data.get("issue_date")
+            due_date = invoice_data.get("due_date")
             
-        return result
-    
-    def _chunk_document(self, text, doc_id, metadata, timestamp) -> List[Dict[str, Any]]:
-        """Split document into chunks for embedding"""
-        # Simplified chunking implementation
-        # In a real implementation, we would use a more sophisticated chunking strategy
-        chunk_size = 1000
-        overlap = 200
-        
-        chunks = []
-        for i in range(0, len(text), chunk_size - overlap):
-            chunk_text = text[i:i + chunk_size]
-            chunk_id = f"{doc_id}_{i}"
+            if not (issue_date and due_date):
+                return False
             
-            chunks.append({
-                "id": chunk_id,
-                "content": chunk_text,
-                "metadata": {
-                    **metadata,
-                    "chunk_id": chunk_id,
-                    "parent_id": doc_id,
-                    "chunk_index": i // (chunk_size - overlap)
-                },
-                "timestamp": timestamp
-            })
+            # Calculate actual days
+            from datetime import datetime
+            issue_dt = datetime.fromisoformat(issue_date)
+            due_dt = datetime.fromisoformat(due_date)
+            actual_days = (due_dt - issue_dt).days
             
-        return chunks
+            # Check if there's a significant discrepancy
+            return abs(actual_days - expected_days) > 2
+        except:
+            return False
     
-    def _compute_embedding(self, text) -> List[float]:
-        """Compute embedding for text using selected model"""
-        # In a real implementation, this would call an embedding API
-        # For now, return random values as placeholder
-        import random
-        return [random.random() for _ in range(self.vector_dimensions)]
+    def _check_shipment_anomalies(self, shipment_data):
+        """Check if a shipment has anomalies"""
+        # Check for status-based anomalies
+        if shipment_data.get("status") == "Delayed":
+            return True
+        
+        # Check for risk score
+        risk_score = shipment_data.get("risk_score")
+        if risk_score and float(risk_score) > 0.7:
+            return True
+        
+        # Check for anomaly type
+        anomaly_type = shipment_data.get("anomaly_type")
+        if anomaly_type and anomaly_type != "none":
+            return True
+        
+        return False
     
-    def _detect_anomalies(self, docs):
-        """Detect anomalies in documents"""
-        # Simplified anomaly detection
-        # For invoices: check for unusual amounts or payment terms
-        # For shipments: check for route deviations or unusual quantities
+    def _determine_anomaly_type(self, shipment_data):
+        """Determine the type of shipment anomaly"""
+        anomaly_type = shipment_data.get("anomaly_type")
+        if anomaly_type and anomaly_type != "none":
+            return anomaly_type
         
-        # Filter documents by type
-        invoices = docs.filter(pw.this.metadata["doc_type"] == "invoice")
-        shipments = docs.filter(pw.this.metadata["doc_type"] == "shipment")
+        if shipment_data.get("status") == "Delayed":
+            return "timeline_delay"
         
-        # Invoice anomalies
-        invoice_anomalies = invoices.select(
-            id=f"anomaly_{pw.this.id}_{pw.this.timestamp}",
-            document_id=pw.this.id,
-            anomaly_type="invoice_amount_unusual",
-            risk_score=0.8,  # Placeholder - would be calculated based on actual data
-            description="Invoice amount significantly deviates from historical average",
-            timestamp=pw.this.timestamp,
-            metadata=pw.this.metadata
-        ).filter(pw.this.risk_score > 0.7)  # Only keep high-risk anomalies
+        return "unknown_anomaly"
+    
+    def _generate_invoice_anomaly_description(self, invoice_data):
+        """Generate a description for an invoice anomaly"""
+        payment_terms = invoice_data.get("payment_terms", "Unknown")
+        supplier = invoice_data.get("supplier", "Unknown")
+        amount = invoice_data.get("amount", "Unknown")
         
-        # Shipment anomalies
-        shipment_anomalies = shipments.select(
-            id=f"anomaly_{pw.this.id}_{pw.this.timestamp}",
-            document_id=pw.this.id,
-            anomaly_type="shipment_route_deviation",
-            risk_score=0.9,  # Placeholder
-            description="Shipment route deviates significantly from expected path",
-            timestamp=pw.this.timestamp,
-            metadata=pw.this.metadata
-        ).filter(pw.this.risk_score > 0.7)
+        return f"Invoice from {supplier} for {amount} does not comply with {payment_terms} payment terms."
+    
+    def _generate_shipment_anomaly_description(self, shipment_data):
+        """Generate a description for a shipment anomaly"""
+        anomaly_type = self._determine_anomaly_type(shipment_data)
+        shipment_id = shipment_data.get("shipment_id", "Unknown")
+        origin = shipment_data.get("origin", "Unknown")
+        destination = shipment_data.get("destination", "Unknown")
         
-        # Combine all anomalies
-        all_anomalies = pw.concat(invoice_anomalies, shipment_anomalies)
+        if anomaly_type == "route_deviation":
+            return f"Shipment {shipment_id} shows deviation from expected route between {origin} and {destination}."
+        elif anomaly_type == "timeline_delay":
+            return f"Shipment {shipment_id} from {origin} to {destination} is experiencing delays."
+        elif anomaly_type == "value_discrepancy":
+            return f"Shipment {shipment_id} has unusual value compared to historical data for this route."
+        else:
+            return f"Anomaly detected in shipment {shipment_id} from {origin} to {destination}."
+    
+    def _calculate_risk_score(self, shipment_data):
+        """Calculate a risk score for a shipment anomaly"""
+        # Use existing risk score if available
+        if "risk_score" in shipment_data:
+            try:
+                return float(shipment_data["risk_score"])
+            except:
+                pass
         
-        return all_anomalies
+        # Default scores based on anomaly type
+        anomaly_type = self._determine_anomaly_type(shipment_data)
+        if anomaly_type == "route_deviation":
+            return 0.85
+        elif anomaly_type == "timeline_delay":
+            return 0.6
+        elif anomaly_type == "value_discrepancy":
+            return 0.9
+        else:
+            return 0.7

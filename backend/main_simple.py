@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -9,6 +9,12 @@ from datetime import datetime
 import asyncio
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import pandas as pd
+
+# Import our enhanced components
+from models.rag_model import LogisticsPulseRAG
+from pipeline.enhanced_anomaly_detector import EnhancedAnomalyDetector
+from utils.document_processor import DocumentProcessor
 
 # Load environment variables
 load_dotenv()
@@ -19,35 +25,72 @@ WATCH_DIR = os.getenv("WATCH_DIR", "./data")
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 INDEX_DIR = os.getenv("INDEX_DIR", "./data/index")
 PROMPTS_DIR = os.getenv("PROMPTS_DIR", "./prompts")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
+# Initialize components
+try:
+    rag_model = LogisticsPulseRAG()
+    anomaly_detector = EnhancedAnomalyDetector(data_dir=DATA_DIR)
+    document_processor = DocumentProcessor()
+    
+    print("✅ All components initialized successfully")
+except Exception as e:
+    print(f"❌ Error initializing components: {e}")
+    rag_model = None
+    anomaly_detector = None
+    document_processor = None
+
 app = FastAPI(
-    title="Logistics Pulse API", 
-    version="1.0.0",
-    description="AI-powered logistics and finance document processing system"
+    title="Logistics Pulse Copilot API", 
+    version="2.0.0",
+    description="Enhanced AI-powered logistics and finance document processing system with advanced RAG and anomaly detection"
 )
 
-# CORS middleware
+# Enhanced CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Frontend URLs
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Data models
+# Enhanced data models
 class ChatMessage(BaseModel):
     message: str
-    context: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
 
 class QueryResponse(BaseModel):
     answer: str
     sources: List[str]
     confidence: float
+    metadata: Optional[Dict[str, Any]] = None
+
+class AnomalyResponse(BaseModel):
+    id: str
+    document_id: str
+    anomaly_type: str
+    risk_score: float
+    severity: str
+    description: str
+    evidence: List[str]
+    recommendations: List[str]
+    timestamp: float
+    metadata: Dict[str, Any]
+
+class DocumentUploadResponse(BaseModel):
+    success: bool
+    message: str
+    document_path: str
+    anomalies: List[AnomalyResponse]
+    
+class SystemStatus(BaseModel):
+    status: str
+    components: Dict[str, Any]
+    data_summary: Dict[str, Any]
 
 # Mock data for testing
 MOCK_ANOMALIES = [
