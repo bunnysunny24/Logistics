@@ -130,6 +130,42 @@ class CausalQueryHandler:
         # Enhance the answer with causal information
         enhanced_answer = self._create_causal_answer(query, causal_analyses, standard_response)
         
+        # Extract causal data for frontend display
+        causal_chains = []
+        risk_holds_data = []
+        
+        for analysis in causal_analyses:
+            if analysis.get("has_anomaly", False):
+                # Build causal chain data
+                chain = {
+                    "entity_id": analysis.get("entity_id"),
+                    "anomaly_type": analysis.get("anomaly", {}).get("data", {}).get("anomaly_type", ""),
+                    "risk_score": analysis.get("anomaly", {}).get("data", {}).get("risk_score", 0),
+                    "causes": []
+                }
+                
+                for cause in analysis.get("potential_causes", [])[:3]:
+                    chain["causes"].append({
+                        "event_type": cause["event"]["event_type"],
+                        "entity_id": cause["event"]["entity_id"],
+                        "timestamp": cause["event"]["timestamp"],
+                        "description": cause["event"]["data"].get("description", ""),
+                        "temporal_proximity": cause["temporal_proximity"]
+                    })
+                
+                causal_chains.append(chain)
+                
+                # Check for risk holds
+                hold_info = self._check_risk_based_holds(analysis)
+                if hold_info:
+                    risk_holds_data.append({
+                        "entity_id": analysis.get("entity_id"),
+                        "hold_type": "risk_based",
+                        "reason": hold_info,
+                        "risk_score": analysis.get("anomaly", {}).get("data", {}).get("risk_score", 0),
+                        "timestamp": analysis.get("anomaly", {}).get("timestamp", 0)
+                    })
+
         return {
             "answer": enhanced_answer,
             "sources": standard_response.get("sources", []),
@@ -138,6 +174,11 @@ class CausalQueryHandler:
                 **standard_response.get("metadata", {}),
                 "causal_reasoning": True,
                 "entities_analyzed": len(causal_analyses)
+            },
+            "causal_analysis": {
+                "chains": causal_chains,
+                "risk_holds": risk_holds_data,
+                "has_causal_data": len(causal_chains) > 0
             }
         }
     
@@ -156,13 +197,13 @@ class CausalQueryHandler:
         standard_answer = standard_response.get("answer", "")
         
         causal_insights = []
-        risk_based_holds = []
+        risk_holds = []
         
         for analysis in causal_analyses:
-            # Check if there are risk-based holds associated with this entity
+            # Check for risk-based holds
             hold_info = self._check_risk_based_holds(analysis)
             if hold_info:
-                risk_based_holds.append(hold_info)
+                risk_holds.append(hold_info)
             
             if analysis.get("has_anomaly", False) and analysis.get("narrative"):
                 # Use the LLM-generated narrative
@@ -180,16 +221,16 @@ class CausalQueryHandler:
                     
                 causal_insights.append(insight)
         
-        combined_answer = standard_answer
+        # Build enhanced response
+        enhanced_parts = [standard_answer]
+        
+        if risk_holds:
+            enhanced_parts.append("\n### 🚨 Risk-Based Holds Applied\n\n" + "\n\n".join(risk_holds))
         
         if causal_insights:
-            # Combine standard answer with causal insights
-            combined_answer += "\n\n### Root Cause Analysis\n\n" + "\n\n".join(causal_insights)
+            enhanced_parts.append("\n### 🧠 Root Cause Analysis\n\n" + "\n\n".join(causal_insights))
         
-        if risk_based_holds:
-            combined_answer += "\n\n### Risk-Based Holds\n\n" + "\n\n".join(risk_based_holds)
-            
-        return combined_answer
+        return "\n".join(enhanced_parts)
     
     def _check_risk_based_holds(self, analysis: Dict) -> Optional[str]:
         """

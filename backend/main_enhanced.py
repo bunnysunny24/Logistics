@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 import os
 import sys
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -36,14 +36,14 @@ except ImportError as e:
 # Load environment variables
 load_dotenv()
 
-# Configuration from environment
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Configuration from environment (fully local - no OpenAI dependencies)
 WATCH_DIR = os.getenv("WATCH_DIR", "./data")
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 INDEX_DIR = os.getenv("INDEX_DIR", "./data/index")
 PROMPTS_DIR = os.getenv("PROMPTS_DIR", "./prompts")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4")
+# Local models only - no external API dependencies
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+LLM_MODEL = os.getenv("LLM_MODEL", "local")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
@@ -233,6 +233,31 @@ app.add_middleware(
 )
 
 # Enhanced data models
+class CausalChain(BaseModel):
+    id: str
+    cause: str
+    effect: str
+    confidence: float
+    evidence: List[str]
+    impact: str
+
+class RiskBasedHold(BaseModel):
+    id: str
+    document_id: str
+    hold_type: str
+    reason: str
+    risk_score: float
+    status: str
+    created_at: str
+    requires_approval: bool
+    approver_type: str
+
+class CausalAnalysis(BaseModel):
+    causal_chains: List[CausalChain]
+    risk_holds: List[RiskBasedHold]
+    reasoning_summary: str
+    confidence_score: float
+
 class ChatMessage(BaseModel):
     message: str
     context: Optional[Dict[str, Any]] = None
@@ -242,6 +267,7 @@ class QueryResponse(BaseModel):
     sources: List[str]
     confidence: float
     metadata: Optional[Dict[str, Any]] = None
+    causal_analysis: Optional[CausalAnalysis] = None
 
 class AnomalyResponse(BaseModel):
     id: str
@@ -335,7 +361,7 @@ async def get_system_status():
                 "rag_model": rag_status,
                 "anomaly_detector": anomaly_summary,
                 "document_processor": document_processor is not None,
-                "openai_configured": bool(OPENAI_API_KEY)
+                "local_mode": True
             },
             data_summary=data_summary
         )
@@ -381,7 +407,7 @@ async def query_documents(query: ChatMessage):
 
 @app.post("/api/query")
 async def api_query_documents(query: ChatMessage):
-    """Query documents using RAG - API version"""
+    """Query documents using RAG - API version with causal analysis"""
     try:
         # Log the query
         logger.info(f"Processing query: {query.message}")
@@ -391,8 +417,21 @@ async def api_query_documents(query: ChatMessage):
             try:
                 # Process query with RAG model
                 result = rag_model.process_query(query.message, query.context)
+                
+                # Generate causal analysis for the query
+                causal_analysis = _generate_causal_analysis(query.message, result)
+                
+                # Create enhanced response
+                response = QueryResponse(
+                    answer=result["answer"],
+                    sources=result["sources"],
+                    confidence=result["confidence"],
+                    metadata=result.get("metadata", {}),
+                    causal_analysis=causal_analysis
+                )
+                
                 logger.info(f"Query processed successfully with confidence: {result.get('confidence', 0)}")
-                return QueryResponse(**result)
+                return response
             except Exception as e:
                 logger.error(f"Error in RAG query processing: {e}")
                 # Return error response
@@ -401,14 +440,10 @@ async def api_query_documents(query: ChatMessage):
                     content={"error": f"Error processing query: {str(e)}"}
                 )
         else:
-            # RAG model not available - use mock response with clear indication
-            logger.warning("RAG model not available, using mock response")
-            return QueryResponse(
-                answer="I'm currently running in demo mode without accessing your uploaded documents. Please ensure the RAG model is properly initialized.",
-                sources=[],
-                confidence=0.1,
-                metadata={"mock_response": True}
-            )
+            # RAG model not available - use enhanced mock response
+            logger.warning("RAG model not available, using enhanced mock response")
+            mock_response = _get_enhanced_mock_response(query.message)
+            return mock_response
     except Exception as e:
         logger.error(f"Query failed: {str(e)}")
         return JSONResponse(
@@ -586,6 +621,99 @@ async def get_anomalies(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving anomalies: {str(e)}")
+
+@app.get("/api/risk-holds")
+async def get_risk_based_holds(
+    status: Optional[str] = None,
+    hold_type: Optional[str] = None,
+    min_risk_score: float = 0.0
+):
+    """Get current risk-based holds"""
+    try:
+        # Generate mock risk-based holds for demonstration
+        # In production, this would come from the causal engine and risk assessment system
+        mock_holds = [
+            {
+                "id": "hold_001",
+                "document_id": "INV-2025-004",
+                "hold_type": "payment_approval",
+                "reason": "Invoice amount deviation exceeds threshold (92.1%)",
+                "risk_score": 0.85,
+                "status": "active",
+                "created_at": datetime.now().isoformat(),
+                "requires_approval": True,
+                "approver_type": "financial_manager",
+                "document_type": "invoice",
+                "metadata": {
+                    "supplier": "ABC Electronics",
+                    "amount": 15750.00,
+                    "deviation_percentage": 92.1
+                }
+            },
+            {
+                "id": "hold_002",
+                "document_id": "SHP-2025-003",
+                "hold_type": "route_verification",
+                "reason": "Non-approved carrier selection for critical route",
+                "risk_score": 0.75,
+                "status": "pending_review",
+                "created_at": datetime.now().isoformat(),
+                "requires_approval": True,
+                "approver_type": "logistics_supervisor",
+                "document_type": "shipment",
+                "metadata": {
+                    "carrier": "Alternative Carriers",
+                    "route": "New York USA → London UK",
+                    "expected_carriers": ["Global Shipping Inc", "Express Worldwide"]
+                }
+            },
+            {
+                "id": "hold_003",
+                "document_id": "INV-2025-007",
+                "hold_type": "compliance_check",
+                "reason": "Missing required documentation for international payment",
+                "risk_score": 0.68,
+                "status": "resolved",
+                "created_at": (datetime.now() - timedelta(hours=2)).isoformat(),
+                "requires_approval": False,
+                "approver_type": "compliance_officer",
+                "document_type": "invoice",
+                "metadata": {
+                    "compliance_issue": "Missing customs declaration",
+                    "resolution": "Documentation provided and verified"
+                }
+            }
+        ]
+        
+        # Apply filters
+        filtered_holds = []
+        for hold in mock_holds:
+            # Risk score filter
+            if hold["risk_score"] < min_risk_score:
+                continue
+                
+            # Status filter
+            if status and hold["status"] != status:
+                continue
+                
+            # Hold type filter
+            if hold_type and hold["hold_type"] != hold_type:
+                continue
+                
+            filtered_holds.append(hold)
+        
+        return {
+            "holds": filtered_holds,
+            "summary": {
+                "total_holds": len(filtered_holds),
+                "active_holds": len([h for h in filtered_holds if h["status"] == "active"]),
+                "pending_holds": len([h for h in filtered_holds if h["status"] == "pending_review"]),
+                "high_risk_holds": len([h for h in filtered_holds if h["risk_score"] >= 0.8])
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving risk-based holds: {str(e)}")
 
 @app.get("/api/indexed-documents")
 async def get_indexed_documents():
@@ -890,7 +1018,7 @@ def _get_mock_response(query: str) -> QueryResponse:
         )
     else:
         return QueryResponse(
-            answer="I'm currently running in demo mode. The full AI system includes advanced RAG (Retrieval-Augmented Generation) capabilities for analyzing logistics data, detecting anomalies in invoices and shipments, and providing detailed insights. Please configure your OpenAI API key for complete functionality. The system processes data from invoices, shipments, and policy documents to provide accurate, context-aware responses.",
+            answer="I'm currently running in demo mode. The full AI system includes advanced RAG (Retrieval-Augmented Generation) capabilities for analyzing logistics data, detecting anomalies in invoices and shipments, and providing detailed insights with causal reasoning. The system runs entirely locally using open-source models and processes data from invoices, shipments, and policy documents to provide accurate, context-aware responses.",
             sources=["system_info.md"],
             confidence=0.60,
             metadata={"mock_response": True, "demo_mode": True, "timestamp": datetime.now().isoformat()}
@@ -1414,425 +1542,133 @@ def _extract_late_fee_info(policies: dict) -> str:
 
 # Real-time data monitoring system
 class LiveDataHandler(FileSystemEventHandler):
-    """Handles real-time file system changes for live data processing"""
+    """Handler for file system events to trigger real-time anomaly detection"""
     
-    def __init__(self, app_instance):
-        self.app = app_instance
-        self.processing_lock = threading.Lock()
-        self.last_processed = {}
-        super().__init__()
-    
+    def __init__(self, anomaly_detector):
+        self.anomaly_detector = anomaly_detector
+        
     def on_modified(self, event):
-        """Handle file modifications"""
         if event.is_directory:
             return
             
-        file_path = event.src_path
-        
-        # Only process relevant files
-        if not (file_path.endswith('.csv') or file_path.endswith('.pdf') or file_path.endswith('.md')):
-            return
-            
-        # Debounce rapid changes
-        current_time = time.time()
-        if file_path in self.last_processed:
-            if current_time - self.last_processed[file_path] < 2:  # 2 second debounce
-                return
-        
-        self.last_processed[file_path] = current_time
-        
-        print(f"🔄 LIVE UPDATE DETECTED: {file_path}")
-        
-        # Process the change in a separate thread to avoid blocking
-        threading.Thread(target=self._process_file_change, args=(file_path,), daemon=True).start()
+        # Only process CSV files in data directories
+        if event.src_path.endswith('.csv') and '/data/' in event.src_path:
+            print(f"📁 File modified: {event.src_path}")
+            self.process_file(event.src_path)
     
     def on_created(self, event):
-        """Handle new file creation"""
         if event.is_directory:
             return
             
-        file_path = event.src_path
-        
-        # Only process relevant files
-        if not (file_path.endswith('.csv') or file_path.endswith('.pdf') or file_path.endswith('.md')):
-            return
-            
-        print(f"📁 NEW FILE DETECTED: {file_path}")
-        
-        # Wait a moment for file to be fully written
-        threading.Thread(target=self._process_new_file, args=(file_path,), daemon=True).start()
+        if event.src_path.endswith('.csv') and '/data/' in event.src_path:
+            print(f"📁 New file created: {event.src_path}")
+            self.process_file(event.src_path)
     
-    def _process_file_change(self, file_path):
-        """Process a file change event"""
+    def process_file(self, file_path):
+        """Process a modified or new file for anomalies"""
         try:
-            with self.processing_lock:
-                print(f"⚡ Processing live update: {os.path.basename(file_path)}")
-                
+            if self.anomaly_detector:
                 # Determine file type and process accordingly
                 if 'invoice' in file_path.lower():
-                    self._process_invoice_update(file_path)
+                    self.process_invoice_file(file_path)
                 elif 'shipment' in file_path.lower():
-                    self._process_shipment_update(file_path)
-                elif 'policy' in file_path.lower() or 'rule' in file_path.lower():
-                    self._process_policy_update(file_path)
-                
-                # Update timestamp for real-time tracking
-                self._update_last_change_timestamp()
-                
-                print(f"✅ Live update processed: {os.path.basename(file_path)}")
-                
+                    self.process_shipment_file(file_path)
         except Exception as e:
-            print(f"❌ Error processing live update {file_path}: {e}")
+            print(f"Error processing file {file_path}: {e}")
     
-    def _process_new_file(self, file_path):
-        """Process a new file creation"""
-        # Wait for file to be fully written
-        time.sleep(1)
-        self._process_file_change(file_path)
-    
-    def _process_invoice_update(self, file_path):
-        """Process invoice file updates"""
+    def process_invoice_file(self, file_path):
+        """Process invoice file for anomalies"""
         try:
-            if anomaly_detector:
-                # Re-analyze the updated invoice file
-                df = pd.read_csv(file_path)
-                new_anomalies = []
-                
-                for _, row in df.iterrows():
-                    invoice_data = row.to_dict()
-                    invoice_data = {k: (v if pd.notna(v) else None) for k, v in invoice_data.items()}
-                    
-                    if invoice_data.get('invoice_id') and str(invoice_data.get('invoice_id')).strip() not in ['', 'invoice_id', 'item']:
-                        anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
-                        new_anomalies.extend(anomalies)
-                
-                if new_anomalies:
-                    print(f"🚨 LIVE ALERT: {len(new_anomalies)} new anomalies detected in {os.path.basename(file_path)}")
-                    
-                    # Add to global anomalies list
-                    if hasattr(anomaly_detector, 'anomalies'):
-                        anomaly_detector.anomalies.extend([{
-                            "id": a.id,
-                            "document_id": a.document_id,
-                            "anomaly_type": a.anomaly_type,
-                            "risk_score": a.risk_score,
-                            "severity": a.severity,
-                            "description": a.description,
-                            "evidence": a.evidence,
-                            "recommendations": a.recommendations,
-                            "timestamp": a.timestamp,
-                            "metadata": a.metadata
-                        } for a in new_anomalies])
-                
-        except Exception as e:
-            print(f"Error processing invoice update: {e}")
-    
-    def _process_shipment_update(self, file_path):
-        """Process shipment file updates"""
-        try:
-            if anomaly_detector:
-                df = pd.read_csv(file_path)
-                new_anomalies = []
-                
-                for _, row in df.iterrows():
-                    shipment_data = row.to_dict()
-                    shipment_data = {k: (v if pd.notna(v) else None) for k, v in shipment_data.items()}
-                    
-                    if shipment_data.get('shipment_id') and str(shipment_data.get('shipment_id')).strip() not in ['', 'shipment_id']:
-                        anomalies = anomaly_detector.detect_shipment_anomalies(shipment_data)
-                        new_anomalies.extend(anomalies)
-                
-                if new_anomalies:
-                    print(f"🚨 LIVE ALERT: {len(new_anomalies)} new shipment anomalies detected in {os.path.basename(file_path)}")
-                
-        except Exception as e:
-            print(f"Error processing shipment update: {e}")
-    
-    def _process_policy_update(self, file_path):
-        """Process policy/rules file updates"""
-        try:
-            print(f"📋 POLICY UPDATE: {os.path.basename(file_path)} - Rules may have changed!")
+            df = pd.read_csv(file_path)
+            new_anomalies = []
             
-            # Trigger re-analysis of existing data against new policies
-            if anomaly_detector:
-                print("🔄 Re-analyzing existing data against updated policies...")
-                # This would trigger a background re-analysis
+            for _, row in df.iterrows():
+                invoice_data = row.to_dict()
+                # Convert NaN values to None
+                invoice_data = {k: (v if pd.notna(v) else None) for k, v in invoice_data.items()}
+                
+                if invoice_data.get('invoice_id'):
+                    anomalies = self.anomaly_detector.detect_invoice_anomalies(invoice_data)
+                    new_anomalies.extend(anomalies)
+            
+            if new_anomalies:
+                print(f"🚨 Detected {len(new_anomalies)} new invoice anomalies")
+                # Add to global anomalies list
+                self.anomaly_detector.anomalies.extend(new_anomalies)
                 
         except Exception as e:
-            print(f"Error processing policy update: {e}")
+            print(f"Error processing invoice file: {e}")
     
-    def _update_last_change_timestamp(self):
-        """Update the global timestamp for tracking when data last changed"""
-        global last_data_change_time
-        last_data_change_time = datetime.now()
+    def process_shipment_file(self, file_path):
+        """Process shipment file for anomalies"""
+        try:
+            df = pd.read_csv(file_path)
+            new_anomalies = []
+            
+            for _, row in df.iterrows():
+                shipment_data = row.to_dict()
+                # Convert NaN values to None
+                shipment_data = {k: (v if pd.notna(v) else None) for k, v in shipment_data.items()}
+                
+                if shipment_data.get('shipment_id'):
+                    anomalies = self.anomaly_detector.detect_shipment_anomalies(shipment_data)
+                    new_anomalies.extend(anomalies)
+            
+            if new_anomalies:
+                print(f"🚨 Detected {len(new_anomalies)} new shipment anomalies")
+                # Add to global anomalies list
+                self.anomaly_detector.anomalies.extend(new_anomalies)
+                
+        except Exception as e:
+            print(f"Error processing shipment file: {e}")
 
-# Global variables for live monitoring
-live_data_handler = None
+# Global variables for file monitoring
 file_observer = None
-last_data_change_time = datetime.now()
 
 def start_live_monitoring():
-    """Start the live file monitoring system"""
-    global live_data_handler, file_observer
-    
-    try:
-        if live_data_handler is None:
-            live_data_handler = LiveDataHandler(app)
-        
-        if file_observer is None:
-            file_observer = Observer()
-            
-            # Monitor the data directory for changes
-            watch_paths = [
-                os.path.join(DATA_DIR, "invoices"),
-                os.path.join(DATA_DIR, "shipments"),
-                os.path.join(DATA_DIR, "policies"),
-                os.path.join(DATA_DIR, "uploads")
-            ]
-            
-            for path in watch_paths:
-                if os.path.exists(path):
-                    file_observer.schedule(live_data_handler, path, recursive=True)
-                    print(f"👁️ Monitoring: {path}")
-                else:
-                    os.makedirs(path, exist_ok=True)
-                    file_observer.schedule(live_data_handler, path, recursive=True)
-                    print(f"👁️ Created and monitoring: {path}")
-            
-            file_observer.start()
-            print("🚀 LIVE MONITORING STARTED - System now watches for real-time changes!")
-            return True
-            
-    except Exception as e:
-        print(f"❌ Error starting live monitoring: {e}")
-        return False
-
-def stop_live_monitoring():
-    """Stop the live file monitoring system"""
+    """Start live file monitoring for real-time anomaly detection"""
     global file_observer
     
-    if file_observer:
+    if not anomaly_detector:
+        print("⚠️ Cannot start live monitoring: anomaly detector not available")
+        return
+    
+    try:
+        event_handler = LiveDataHandler(anomaly_detector)
+        file_observer = Observer()
+        
+        # Monitor data directories
+        data_dirs_to_watch = [
+            os.path.join(DATA_DIR, "invoices"),
+            os.path.join(DATA_DIR, "shipments"),
+            os.path.join(DATA_DIR, "uploads")
+        ]
+        
+        for dir_path in data_dirs_to_watch:
+            if os.path.exists(dir_path):
+                file_observer.schedule(event_handler, dir_path, recursive=True)
+                print(f"👁️ Monitoring: {dir_path}")
+        
+        file_observer.start()
+        print("✅ Live monitoring started")
+        
+    except Exception as e:
+        print(f"❌ Failed to start live monitoring: {e}")
+
+def stop_live_monitoring():
+    """Stop live file monitoring"""
+    global file_observer
+    
+    if file_observer and file_observer.is_alive():
         file_observer.stop()
         file_observer.join()
-        file_observer = None
-        print("🛑 Live monitoring stopped")
-
-@app.get("/api/live-status")
-async def get_live_status():
-    """Get real-time monitoring status"""
-    global last_data_change_time, file_observer
-    
-    return {
-        "live_monitoring_active": file_observer is not None and file_observer.is_alive(),
-        "last_data_change": last_data_change_time.isoformat(),
-        "monitoring_paths": [
-            f"{DATA_DIR}/invoices",
-            f"{DATA_DIR}/shipments", 
-            f"{DATA_DIR}/policies",
-            f"{DATA_DIR}/uploads"
-        ],
-        "current_time": datetime.now().isoformat(),
-        "system_status": "LIVE" if file_observer and file_observer.is_alive() else "STATIC"
-    }
-
-@app.post("/api/simulate-live-update")
-async def simulate_live_update(
-    file_type: str = "invoice",
-    update_type: str = "new_record"
-):
-    """Simulate a live data update for demonstration purposes"""
-    try:
-        if file_type == "invoice":
-            return await _simulate_invoice_update(update_type)
-        elif file_type == "shipment":
-            return await _simulate_shipment_update(update_type)
-        elif file_type == "policy":
-            return await _simulate_policy_update(update_type)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid file_type. Use: invoice, shipment, or policy")
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Simulation failed: {str(e)}")
-
-async def _simulate_invoice_update(update_type: str):
-    """Simulate invoice data changes for live demo"""
-    
-    # Create a test invoice file with current timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    test_file = os.path.join(DATA_DIR, "invoices", f"live_test_invoice_{timestamp}.csv")
-    
-    if update_type == "new_record":
-        # Create a new invoice with potential anomaly
-        test_data = {
-            "invoice_id": f"INV-LIVE-{timestamp[-6:]}",
-            "supplier": "Live Test Supplier",
-            "amount": 25000.00,  # High amount to trigger anomaly
-            "currency": "USD",
-            "issued_date": datetime.now().strftime("%Y-%m-%d"),
-            "due_date": (datetime.now()).strftime("%Y-%m-%d"),
-            "payment_terms": "Immediate",  # Unusual payment terms
-            "status": "pending",
-            "approved_by": "system",
-            "notes": "Live test invoice - high value"
-        }
-        
-        df = pd.DataFrame([test_data])
-        df.to_csv(test_file, index=False)
-        
-        return {
-            "success": True,
-            "message": "Live invoice update simulated",
-            "file_created": test_file,
-            "invoice_id": test_data["invoice_id"],
-            "amount": test_data["amount"],
-            "expected_anomalies": ["High amount deviation", "Unusual payment terms"],
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    elif update_type == "policy_change":
-        # Simulate a policy change affecting existing invoices
-        policy_file = os.path.join(DATA_DIR, "policies", f"updated_rules_{timestamp}.md")
-        
-        policy_content = f"""# Updated Payment Rules - {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-## Late Fee Policy (UPDATED)
-- Late fees now apply after 15 days (previously 30 days)
-- Late fee rate increased to 2.5% per month (previously 1.5%)
-- All invoices over $20,000 require CFO approval (previously $50,000)
-
-## New Compliance Rules
-- Weekend processing now requires additional documentation
-- Emergency payment terms (< 7 days) require director approval
-
-*This policy update affects all pending invoices immediately*
-"""
-        
-        with open(policy_file, 'w') as f:
-            f.write(policy_content)
-        
-        return {
-            "success": True,
-            "message": "Live policy update simulated",
-            "file_created": policy_file,
-            "changes": [
-                "Late fee threshold reduced to 15 days",
-                "Late fee rate increased to 2.5%",
-                "Approval threshold lowered to $20,000"
-            ],
-            "impact": "All pending invoices will be re-evaluated against new rules",
-            "timestamp": datetime.now().isoformat()
-        }
-
-async def _simulate_shipment_update(update_type: str):
-    """Simulate shipment data changes"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    test_file = os.path.join(DATA_DIR, "shipments", f"live_test_shipment_{timestamp}.csv")
-    
-    test_data = {
-        "shipment_id": f"SHP-LIVE-{timestamp[-6:]}",
-        "origin": "New York USA",
-        "destination": "London UK",
-        "carrier": "Suspicious Freight Co",  # Unusual carrier to trigger anomaly
-        "shipped_date": datetime.now().strftime("%Y-%m-%d"),
-        "expected_delivery": (datetime.now()).strftime("%Y-%m-%d"),
-        "actual_delivery": None,
-        "status": "in_transit",
-        "value": 75000.00,  # High value
-        "weight": "2500 kg",
-        "notes": "Live test - route deviation detected"
-    }
-    
-    df = pd.DataFrame([test_data])
-    df.to_csv(test_file, index=False)
-    
-    return {
-        "success": True,
-        "message": "Live shipment update simulated",
-        "file_created": test_file,
-        "shipment_id": test_data["shipment_id"],
-        "carrier": test_data["carrier"],
-        "expected_anomalies": ["Unusual carrier", "High value shipment"],
-        "timestamp": datetime.now().isoformat()
-    }
-
-async def _simulate_policy_update(update_type: str):
-    """Simulate policy updates"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    policy_file = os.path.join(DATA_DIR, "policies", f"emergency_update_{timestamp}.md")
-    
-    content = f"""# EMERGENCY POLICY UPDATE - {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-## IMMEDIATE ACTION REQUIRED
-
-### New Risk Thresholds (Effective Immediately)
-- High-risk shipments: Value > $50,000 (previously $100,000)
-- Carrier verification required for all new freight companies
-- Route deviations > 50km require immediate notification
-
-### Updated Approval Matrix
-- Invoices > $15,000: Manager approval required
-- Invoices > $30,000: Director approval required  
-- Weekend processing: Additional documentation mandatory
-
-**This update supersedes all previous policies.**
-"""
-    
-    with open(policy_file, 'w') as f:
-        f.write(content)
-    
-    return {
-        "success": True,
-        "message": "Emergency policy update simulated",
-        "file_created": policy_file,
-        "changes": [
-            "Risk thresholds lowered",
-            "Carrier verification mandatory",
-            "Approval limits reduced"
-        ],
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/api/live-demo")
-async def get_live_demo_info():
-    """Get information about live demonstration capabilities"""
-    return {
-        "demo_features": {
-            "real_time_monitoring": "File system monitoring active",
-            "instant_anomaly_detection": "New files trigger immediate analysis", 
-            "policy_updates": "Rule changes affect system immediately",
-            "before_after_proof": "Ask same question before/after file changes"
-        },
-        "demo_scenarios": [
-            {
-                "name": "Invoice Compliance",
-                "description": "Add high-value invoice → triggers anomaly detection",
-                "endpoint": "/api/simulate-live-update?file_type=invoice&update_type=new_record"
-            },
-            {
-                "name": "Policy Change Impact", 
-                "description": "Update payment rules → existing invoices re-evaluated",
-                "endpoint": "/api/simulate-live-update?file_type=invoice&update_type=policy_change"
-            },
-            {
-                "name": "Shipment Fraud Detection",
-                "description": "Add suspicious shipment → fraud alerts triggered",
-                "endpoint": "/api/simulate-live-update?file_type=shipment"
-            }
-        ],
-        "proof_of_concept": {
-            "step_1": "Ask: 'How many invoices are there?'",
-            "step_2": "Call /api/simulate-live-update?file_type=invoice",
-            "step_3": "Ask same question → count will increase",
-            "step_4": "Ask: 'Show me recent anomalies' → new anomalies appear"
-        },
-        "monitoring_status": file_observer.is_alive() if file_observer else False
-    }
+        print("✅ Live monitoring stopped")
 
 if __name__ == "__main__":
     print(f"🚀 Starting Logistics Pulse Copilot API v2.0")
     print(f"📊 Data directory: {DATA_DIR}")
-    print(f"🤖 OpenAI configured: {'Yes' if OPENAI_API_KEY else 'No'}")
-    print(f"🔧 Components loaded: RAG={rag_model is not None}, Anomaly={anomaly_detector is not None}, Processor={document_processor is not None}")
+    print(f"🔧 Local models only (no external API dependencies)")
+    print(f"🤖 Components loaded: RAG={rag_model is not None}, Anomaly={anomaly_detector is not None}, Processor={document_processor is not None}")
     
     # Run startup anomaly detection before starting the server
     if anomaly_detector:

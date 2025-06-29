@@ -49,6 +49,16 @@ export const getAnomalies = async (params = {}) => {
   }
 };
 
+export const getRiskBasedHolds = async (params = {}) => {
+  try {
+    const response = await api.get('/api/risk-holds', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching risk-based holds:', error);
+    throw error;
+  }
+};
+
 export const getSystemStatus = async () => {
   try {
     const response = await api.get('/api/status');

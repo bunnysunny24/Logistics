@@ -3,7 +3,6 @@ import time
 import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from langchain_openai import OpenAI, ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
@@ -12,62 +11,42 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import LLMChainExtractor
 import pandas as pd
 from loguru import logger
-from models.local_llm import LocalHuggingFaceLLM  # Add this import
+from models.local_llm import LocalHuggingFaceLLM
 
 class LogisticsPulseRAG:
     # In backend/models/rag_model.py - update the __init__ method
 
     def __init__(self):
-    # Load environment variables
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.llm_model = os.getenv("LLM_MODEL", "local")  # Default to local
-        self.embedding_model = os.getenv("EMBEDDING_MODEL", "local")  # Default to local
+        # Load environment variables - fully local setup
+        self.llm_model = os.getenv("LLM_MODEL", "local")
+        self.embedding_model = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
         self.index_dir = os.getenv("INDEX_DIR", "./data/index")
         self.data_dir = os.getenv("DATA_DIR", "./data")
-    
-    # Real-time monitoring attributes remain the same
+        
+        # Real-time monitoring attributes
         self.last_policy_update = datetime.now()
         self.policy_cache = {}
         self.compliance_rules_cache = {}
-    
-    # Initialize with local models by default
-        logger.info("Using local models for embeddings and text generation")
-    
-    # Only use OpenAI if explicitly configured and API key is available
-        if self.api_key and self.embedding_model != "local" and self.llm_model != "local":
-            try:
-                self.llm = ChatOpenAI(
-                    model=self.llm_model,
-                    temperature=0.1,
-                    max_tokens=2000,
-                    api_key=self.api_key
-                )
-                self.embeddings = OpenAIEmbeddings(
-                    model=self.embedding_model,
-                    api_key=self.api_key
-                )
-                logger.info("Successfully initialized OpenAI models")
-            except Exception as e:
-                logger.warning(f"Failed to initialize OpenAI models: {e}. Falling back to local models.")
-                self.llm = None
-                self.embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-        else:
-        # Use local models
-            if self.llm_model == "local" or not self.api_key:
-                try:
-        # Try to load a smaller model by default
-                    self.llm = LocalHuggingFaceLLM(model_name="facebook/opt-1.3b")  # You can choose different models
-                except Exception as e:
-                    logger.error(f"Failed to load local LLM: {e}")
-                    self.llm = None  # Fall back to template responses
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
-            )
+        
+        # Initialize with local models only
+        logger.info("Initializing fully local RAG system - no external API dependencies")
+        
+        # Use local models exclusively
+        try:
+            # Try to load a smaller model by default
+            self.llm = LocalHuggingFaceLLM(model_name="facebook/opt-1.3b")
+            logger.info("Successfully initialized local LLM")
+        except Exception as e:
+            logger.error(f"Failed to load local LLM: {e}")
+            self.llm = None  # Fall back to template responses
+            
+        # Local embeddings
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name=self.embedding_model
+        )
+        logger.info(f"Successfully initialized local embeddings: {self.embedding_model}")
         
         # Load and refresh data
         self.load_prompts()

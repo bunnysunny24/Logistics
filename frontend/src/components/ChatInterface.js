@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { queryLogisticsCopilot } from '../lib/api';
 import { FaArrowCircleRight, FaSpinner, FaLightbulb, FaHistory, FaCopy } from 'react-icons/fa';
+import CausalAnalysisDisplay from './CausalAnalysisDisplay';
 
 function ChatInterface() {
   const [messages, setMessages] = useState([]);
@@ -112,7 +113,8 @@ function ChatInterface() {
         sources: response.sources,
         confidence: response.confidence,
         responseTime: responseTime,
-        metadata: response.metadata
+        metadata: response.metadata,
+        causal_analysis: response.causal_analysis
       };
       
       setMessages((prev) => [...prev, copilotMessage]);
@@ -230,6 +232,11 @@ function ChatInterface() {
                 </button>
               </div>
             </div>
+          )}
+          
+          {/* Causal Analysis Display */}
+          {!isUser && message.causal_analysis && (
+            <CausalAnalysisDisplay causalAnalysis={message.causal_analysis} />
           )}
         </div>
         
