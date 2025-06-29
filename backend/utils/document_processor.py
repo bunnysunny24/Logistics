@@ -107,28 +107,29 @@ class DocumentProcessor:
             logger.error(f"Error processing CSV {source_path}: {e}")
             raise
     
-    def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extract text from PDF files using PyPDF2"""
+    def _extract_text_from_pdf(self, pdf_path):
+        """Extract text content from PDF file"""
         try:
-            import PyPDF2  # You may need to install this: pip install PyPDF2
+            import pdfminer
+            from pdfminer.high_level import extract_text
         
-            text = ""
-            with open(pdf_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                for page_num in range(len(reader.pages)):
-                    page = reader.pages[page_num]
-                    text += page.extract_text() + "\n\n"
-        
-            if not text.strip():
-                logger.warning(f"No text extracted from PDF: {pdf_path}")
-                # Fallback text if extraction fails
-            text = f"Document: {os.path.basename(pdf_path)}\nNo extractable text content found."
-
+            text = extract_text(pdf_path)
             return text
-    
         except Exception as e:
             logger.error(f"Error extracting text from PDF {pdf_path}: {e}")
-            return f"Error extracting text from {os.path.basename(pdf_path)}: {str(e)}"
+            return ""
+
+    def _extract_tables_from_pdf(self, pdf_path):
+        """Extract tables from PDF file"""
+        try:
+            import tabula
+        
+        # Read PDF into DataFrame list
+            tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True)
+            return tables
+        except Exception as e:
+            logger.error(f"Error extracting tables from PDF {pdf_path}: {e}")
+            return []
     
     def extract_invoice_data(self, invoice_path: str) -> Dict[str, Any]:
         """
