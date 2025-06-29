@@ -34,32 +34,39 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
   }, [minRiskScore, refreshTrigger]);
   
   const prepareChartData = (anomalyData) => {
-    // Group anomalies by type
-    const anomalyTypes = {};
-    
-    anomalyData.forEach(anomaly => {
-      const type = anomaly.anomaly_type;
-      if (!anomalyTypes[type]) {
-        anomalyTypes[type] = 0;
+    try {
+      // Group anomalies by type
+      const anomalyTypes = {};
+      
+      if (Array.isArray(anomalyData)) {
+        anomalyData.forEach(anomaly => {
+          const type = anomaly.anomaly_type || anomaly.type || 'Unknown';
+          if (!anomalyTypes[type]) {
+            anomalyTypes[type] = 0;
+          }
+          anomalyTypes[type]++;
+        });
       }
-      anomalyTypes[type]++;
-    });
-    
-    const labels = Object.keys(anomalyTypes);
-    const data = Object.values(anomalyTypes);
-    
-    setChartData({
-      labels,
-      datasets: [
-        {
-          label: 'Anomaly Count',
-          data,
-          backgroundColor: 'rgba(255, 99, 132, 0.5)',
-          borderColor: 'rgba(255, 99, 132, 1)',
-          borderWidth: 1,
-        },
-      ],
-    });
+      
+      const labels = Object.keys(anomalyTypes);
+      const data = Object.values(anomalyTypes);
+      
+      setChartData({
+        labels,
+        datasets: [
+          {
+            label: 'Anomaly Count',
+            data,
+            backgroundColor: 'rgba(255, 99, 132, 0.5)',
+            borderColor: 'rgba(255, 99, 132, 1)',
+            borderWidth: 1,
+          },
+        ],
+      });
+    } catch (error) {
+      console.error('Error preparing chart data:', error);
+      setChartData(null);
+    }
   };
   
   const toggleAnomaly = (id) => {
@@ -71,7 +78,18 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
   };
   
   const formatTimestamp = (timestamp) => {
-    return new Date(timestamp * 1000).toLocaleString();
+    try {
+      // Handle both Unix timestamp and ISO string formats
+      if (typeof timestamp === 'number') {
+        return new Date(timestamp * 1000).toLocaleString();
+      } else if (typeof timestamp === 'string') {
+        return new Date(timestamp).toLocaleString();
+      }
+      return 'Unknown';
+    } catch (error) {
+      console.error('Error formatting timestamp:', error);
+      return 'Invalid Date';
+    }
   };
   
   const getRiskLevelClass = (score) => {
@@ -159,13 +177,15 @@ function AnomalyDashboard({ refreshTrigger = 0 }) {
                         onClick={() => toggleAnomaly(anomaly.id)}
                       >
                         <div className="flex items-center">
-                          <span className={`badge mr-3 ${getRiskLevelClass(anomaly.risk_score)}`}>
-                            {anomaly.risk_score.toFixed(2)}
+                          <span className={`badge mr-3 ${getRiskLevelClass(anomaly.risk_score || 0)}`}>
+                            {(anomaly.risk_score || 0).toFixed(2)}
                           </span>
                           <div>
-                            <h6 className="text-sm font-medium">{anomaly.anomaly_type.replace(/_/g, ' ')}</h6>
+                            <h6 className="text-sm font-medium">
+                              {(anomaly.anomaly_type || anomaly.type || 'Unknown').replace(/_/g, ' ')}
+                            </h6>
                             <p className="text-xs text-gray-500">
-                              Document: {anomaly.document_id}
+                              Document: {anomaly.document_id || anomaly.id || 'N/A'}
                             </p>
                           </div>
                         </div>

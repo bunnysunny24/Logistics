@@ -54,9 +54,12 @@ MOCK_ANOMALIES = [
     {
         "id": "1",
         "type": "shipment_delay",
+        "anomaly_type": "shipment_delay",
         "description": "Shipment delayed by 2 days",
         "severity": "medium",
+        "risk_score": 0.75,
         "timestamp": "2024-01-15T10:30:00Z",
+        "document_id": "SH001",
         "details": {
             "shipment_id": "SH001",
             "expected_delivery": "2024-01-15T18:00:00Z",
@@ -66,13 +69,47 @@ MOCK_ANOMALIES = [
     {
         "id": "2",
         "type": "invoice_discrepancy",
+        "anomaly_type": "invoice_discrepancy",
         "description": "Invoice amount mismatch",
         "severity": "high",
+        "risk_score": 0.92,
         "timestamp": "2024-01-14T14:20:00Z",
+        "document_id": "INV001",
         "details": {
             "invoice_id": "INV001",
             "expected_amount": 1500.00,
             "actual_amount": 1800.00
+        }
+    },
+    {
+        "id": "3",
+        "type": "delivery_route_anomaly",
+        "anomaly_type": "delivery_route_anomaly",
+        "description": "Unusual delivery route detected",
+        "severity": "low",
+        "risk_score": 0.45,
+        "timestamp": "2024-01-16T09:15:00Z",
+        "document_id": "SH002",
+        "details": {
+            "shipment_id": "SH002",
+            "expected_route": "Route A",
+            "actual_route": "Route B",
+            "delay_minutes": 45
+        }
+    },
+    {
+        "id": "4",
+        "type": "payment_timing_anomaly",
+        "anomaly_type": "payment_timing_anomaly", 
+        "description": "Payment processed outside normal hours",
+        "severity": "medium",
+        "risk_score": 0.68,
+        "timestamp": "2024-01-13T23:45:00Z",
+        "document_id": "INV002",
+        "details": {
+            "invoice_id": "INV002",
+            "payment_time": "23:45",
+            "normal_hours": "09:00-17:00"
         }
     }
 ]
@@ -103,7 +140,7 @@ async def upload_file(file: UploadFile = File(...)):
     """Upload and process a document"""
     try:
         # Save the uploaded file
-        upload_dir = os.path.join("data", "uploads")
+        upload_dir = os.path.join(DATA_DIR, "uploads")
         os.makedirs(upload_dir, exist_ok=True)
         
         file_path = os.path.join(upload_dir, file.filename)
@@ -127,7 +164,7 @@ async def ingest_document(file: UploadFile = File(...)):
     """Ingest and process a document - API version"""
     try:
         # Save the uploaded file
-        upload_dir = os.path.join("data", "uploads")
+        upload_dir = os.path.join(DATA_DIR, "uploads")
         os.makedirs(upload_dir, exist_ok=True)
         
         file_path = os.path.join(upload_dir, file.filename)

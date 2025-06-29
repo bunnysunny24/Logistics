@@ -67,7 +67,21 @@ def test_anomalies_endpoint():
         if response.status_code == 200:
             data = response.json()
             if "anomalies" in data:
-                print(f"✅ Anomalies endpoint working ({len(data['anomalies'])} anomalies)")
+                anomalies = data["anomalies"]
+                print(f"✅ Anomalies endpoint working ({len(anomalies)} anomalies)")
+                
+                # Check if anomalies have required fields
+                if anomalies:
+                    first_anomaly = anomalies[0]
+                    required_fields = ['id', 'risk_score', 'anomaly_type', 'document_id']
+                    missing_fields = [field for field in required_fields if field not in first_anomaly]
+                    
+                    if missing_fields:
+                        print(f"   ⚠️  Missing fields in anomaly data: {missing_fields}")
+                    else:
+                        print(f"   ✅ Anomaly data structure is correct")
+                        print(f"   📊 Sample: {first_anomaly['anomaly_type']} (risk: {first_anomaly['risk_score']})")
+                
                 return True
             else:
                 print("❌ Anomalies endpoint returned unexpected format")

@@ -43,13 +43,26 @@ An AI-powered logistics and finance document processing system with real-time an
    ```bash
    cd backend
    pip install -r ../requirements.txt
+   
+   # Copy and configure environment file
+   copy .env.example .env
+   # Edit .env and add your OpenAI API key
    ```
 
 3. **Frontend Setup**
    ```bash
    cd frontend
    npm install
+   
+   # Copy and configure environment file (optional)
+   copy .env.example .env
+   # The frontend .env is optional - defaults will work for local development
    ```
+
+4. **Environment Configuration**
+   - **Backend `.env`**: Contains API keys and server configuration
+   - **Frontend `.env`**: Contains React app configuration (API URL, user settings)
+   - Both files have `.example` templates you can copy from
 
 ### Running the Application
 
