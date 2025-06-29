@@ -12,8 +12,8 @@ const api = axios.create({
 
 export const queryLogisticsCopilot = async (query: string, context?: unknown) => {
   try {
-    const response = await api.post('/api/query', {
-      query,
+    const response = await api.post('/query', {
+      message: query,
       context,
     });
     return response.data;
@@ -33,7 +33,7 @@ export const uploadDocument = async (file: File, docType: string, metadata?: unk
   }
   
   try {
-    const response = await api.post('/api/ingest', formData, {
+    const response = await api.post('/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -51,7 +51,7 @@ export const getAnomalies = async (params?: {
   minRiskScore?: number;
 }) => {
   try {
-    const response = await api.get('/api/anomalies', { params });
+    const response = await api.get('/anomalies', { params });
     return response.data;
   } catch (error) {
     console.error('Error fetching anomalies:', error);
@@ -61,7 +61,7 @@ export const getAnomalies = async (params?: {
 
 export const getSystemStatus = async () => {
   try {
-    const response = await api.get('/api/status');
+    const response = await api.get('/health');
     return response.data;
   } catch (error) {
     console.error('Error fetching system status:', error);
