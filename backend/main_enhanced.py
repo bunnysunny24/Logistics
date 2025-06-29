@@ -16,7 +16,7 @@ from watchdog.events import FileSystemEventHandler
 import threading
 import time
 import re
-
+from loguru import logger
 # Add current directory to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:

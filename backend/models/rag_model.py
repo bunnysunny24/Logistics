@@ -15,37 +15,56 @@ from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
 import pandas as pd
 from loguru import logger
+from models.local_llm import LocalHuggingFaceLLM  # Add this import
 
 class LogisticsPulseRAG:
+    # In backend/models/rag_model.py - update the __init__ method
+
     def __init__(self):
-        # Load environment variables
+    # Load environment variables
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.llm_model = os.getenv("LLM_MODEL", "gpt-4")
-        self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+        self.llm_model = os.getenv("LLM_MODEL", "local")  # Default to local
+        self.embedding_model = os.getenv("EMBEDDING_MODEL", "local")  # Default to local
         self.index_dir = os.getenv("INDEX_DIR", "./data/index")
         self.data_dir = os.getenv("DATA_DIR", "./data")
-        
-        # Real-time monitoring attributes
+    
+    # Real-time monitoring attributes remain the same
         self.last_policy_update = datetime.now()
         self.policy_cache = {}
         self.compliance_rules_cache = {}
-        
-        # Initialize components with better models
-        if self.api_key:
-            self.llm = ChatOpenAI(
-                model=self.llm_model,
-                temperature=0.1,  # Lower temperature for more consistent responses
-                max_tokens=2000,
-                api_key=self.api_key
-            )
-            self.embeddings = OpenAIEmbeddings(
-                model=self.embedding_model,
-                api_key=self.api_key
-            )
+    
+    # Initialize with local models by default
+        logger.info("Using local models for embeddings and text generation")
+    
+    # Only use OpenAI if explicitly configured and API key is available
+        if self.api_key and self.embedding_model != "local" and self.llm_model != "local":
+            try:
+                self.llm = ChatOpenAI(
+                    model=self.llm_model,
+                    temperature=0.1,
+                    max_tokens=2000,
+                    api_key=self.api_key
+                )
+                self.embeddings = OpenAIEmbeddings(
+                    model=self.embedding_model,
+                    api_key=self.api_key
+                )
+                logger.info("Successfully initialized OpenAI models")
+            except Exception as e:
+                logger.warning(f"Failed to initialize OpenAI models: {e}. Falling back to local models.")
+                self.llm = None
+                self.embeddings = HuggingFaceEmbeddings(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
         else:
-            # Fallback to local models
-            logger.warning("OpenAI API key not found, using local models")
-            self.llm = None  # Will be handled in process_query
+        # Use local models
+            if self.llm_model == "local" or not self.api_key:
+                try:
+        # Try to load a smaller model by default
+                    self.llm = LocalHuggingFaceLLM(model_name="facebook/opt-1.3b")  # You can choose different models
+                except Exception as e:
+                    logger.error(f"Failed to load local LLM: {e}")
+                    self.llm = None  # Fall back to template responses
             self.embeddings = HuggingFaceEmbeddings(
                 model_name="sentence-transformers/all-MiniLM-L6-v2"
             )
