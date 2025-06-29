@@ -128,18 +128,19 @@ class EnhancedAnomalyDetector:
             if os.path.exists(invoice_file):
                 df = pd.read_csv(invoice_file)
                 
-                # Analyze by supplier
+                # Analyze by supplier (exclude flagged invoices from baseline)
                 for supplier in df['supplier'].unique():
-                    supplier_data = df[df['supplier'] == supplier]
+                    supplier_data = df[(df['supplier'] == supplier) & (df['status'] != 'flagged')]
                     
-                    self.historical_data["supplier_profiles"][supplier] = {
-                        "avg_amount": supplier_data['amount'].mean(),
-                        "std_amount": supplier_data['amount'].std(),
-                        "typical_terms": supplier_data['payment_terms'].mode().iloc[0] if len(supplier_data) > 0 else "NET30",
-                        "avg_discount": supplier_data['early_discount'].mean(),
-                        "invoice_count": len(supplier_data),
-                        "flagged_rate": (supplier_data['status'] == 'flagged').mean()
-                    }
+                    if len(supplier_data) > 0:
+                        self.historical_data["supplier_profiles"][supplier] = {
+                            "avg_amount": supplier_data['amount'].mean(),
+                            "std_amount": supplier_data['amount'].std(),
+                            "typical_terms": supplier_data['payment_terms'].mode().iloc[0] if len(supplier_data) > 0 else "NET30",
+                            "avg_discount": supplier_data['early_discount'].mean() if 'early_discount' in supplier_data.columns else 0.0,
+                            "invoice_count": len(supplier_data),
+                            "flagged_rate": (df[df['supplier'] == supplier]['status'] == 'flagged').mean()
+                        }
                 
                 logger.info(f"Analyzed {len(df)} historical invoices for {len(df['supplier'].unique())} suppliers")
                 
