@@ -8,13 +8,32 @@ import json
 from datetime import datetime
 import asyncio
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
-app = FastAPI(title="Logistics Pulse API", version="1.0.0")
+# Load environment variables
+load_dotenv()
+
+# Configuration from environment
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+WATCH_DIR = os.getenv("WATCH_DIR", "./data")
+DATA_DIR = os.getenv("DATA_DIR", "./data")
+INDEX_DIR = os.getenv("INDEX_DIR", "./data/index")
+PROMPTS_DIR = os.getenv("PROMPTS_DIR", "./prompts")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8000"))
+
+app = FastAPI(
+    title="Logistics Pulse API", 
+    version="1.0.0",
+    description="AI-powered logistics and finance document processing system"
+)
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Frontend URLs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,6 +94,10 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+@app.get("/api/status")
+async def api_status_check():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Upload and process a document"""
@@ -99,9 +122,70 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
 
+@app.post("/api/ingest")
+async def ingest_document(file: UploadFile = File(...)):
+    """Ingest and process a document - API version"""
+    try:
+        # Save the uploaded file
+        upload_dir = os.path.join("data", "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        file_path = os.path.join(upload_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Mock processing
+        return {
+            "success": True,
+            "message": "Document ingested successfully",
+            "filename": file.filename,
+            "size": len(content),
+            "processed": True,
+            "document_type": "invoice" if "invoice" in file.filename.lower() else "shipment"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to ingest document: {str(e)}")
+
 @app.post("/query")
 async def query_documents(query: ChatMessage):
     """Query documents using RAG"""
+    try:
+        # Mock RAG response
+        mock_responses = {
+            "shipment": {
+                "answer": "Based on the shipment data, there are currently 149 delayed shipments out of 1247 total shipments. The main causes include weather delays and customs processing delays.",
+                "sources": ["shipment_001.pdf", "logistics_report.pdf"],
+                "confidence": 0.85
+            },
+            "invoice": {
+                "answer": "The invoice analysis shows a total of 892 invoices with a combined amount of $2,456,789.50. There are 23 detected anomalies, primarily involving amount discrepancies.",
+                "sources": ["invoice_summary.pdf", "financial_report.pdf"],
+                "confidence": 0.92
+            },
+            "default": {
+                "answer": "I found relevant information in the logistics database. The system is tracking shipments, invoices, and detecting anomalies in real-time.",
+                "sources": ["general_data.pdf"],
+                "confidence": 0.75
+            }
+        }
+        
+        # Simple keyword matching for demo
+        query_lower = query.message.lower()
+        if "shipment" in query_lower or "delivery" in query_lower:
+            response = mock_responses["shipment"]
+        elif "invoice" in query_lower or "payment" in query_lower:
+            response = mock_responses["invoice"]
+        else:
+            response = mock_responses["default"]
+        
+        return QueryResponse(**response)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+@app.post("/api/query")
+async def api_query_documents(query: ChatMessage):
+    """Query documents using RAG - API version"""
     try:
         # Mock RAG response
         mock_responses = {
@@ -140,6 +224,11 @@ async def get_anomalies():
     """Get detected anomalies"""
     return {"anomalies": MOCK_ANOMALIES, "total": len(MOCK_ANOMALIES)}
 
+@app.get("/api/anomalies")
+async def api_get_anomalies():
+    """Get detected anomalies - API version"""
+    return {"anomalies": MOCK_ANOMALIES, "total": len(MOCK_ANOMALIES)}
+
 @app.get("/stats")
 async def get_statistics():
     """Get logistics statistics"""
@@ -169,6 +258,9 @@ async def list_documents():
 
 if __name__ == "__main__":
     print("Starting Logistics Pulse API server...")
-    print("Server will be available at: http://localhost:8000")
-    print("API docs available at: http://localhost:8000/docs")
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    print(f"Server will be available at: http://{HOST}:{PORT}")
+    print(f"API docs available at: http://{HOST}:{PORT}/docs")
+    print(f"Using OpenAI API: {'✅ Configured' if OPENAI_API_KEY else '❌ Missing'}")
+    print(f"Data directory: {DATA_DIR}")
+    print(f"LLM Model: {LLM_MODEL}")
+    uvicorn.run(app, host=HOST, port=PORT, reload=True)

@@ -1,36 +1,123 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Logistics Pulse Copilot
 
-## Getting Started
+An AI-powered logistics and finance document processing system with real-time anomaly detection and intelligent chat interface.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Document Processing**: Upload and process invoices, shipments, and policy documents
+- **AI Chat Interface**: Query documents using natural language with RAG (Retrieval-Augmented Generation)
+- **Anomaly Detection**: Real-time detection of anomalies in logistics and financial data
+- **Interactive Dashboard**: Visual analytics and statistics for logistics operations
+- **Multi-format Support**: Process PDF, CSV, and other document formats
+
+## Tech Stack
+
+### Backend
+- **FastAPI**: Modern Python web framework for building APIs
+- **Pathway**: Real-time data processing and vector search
+- **LangChain**: LLM orchestration and document processing
+- **Pydantic**: Data validation and serialization
+
+### Frontend
+- **React**: Modern JavaScript framework
+- **Tailwind CSS**: Utility-first CSS framework
+- **Chart.js**: Data visualization
+- **Axios**: HTTP client for API calls
+
+## Quick Start
+
+### Prerequisites
+- Python 3.8+
+- Node.js 16+
+- npm or yarn
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd logistics-pulse-copilot
+   ```
+
+2. **Backend Setup**
+   ```bash
+   cd backend
+   pip install -r ../requirements.txt
+   ```
+
+3. **Frontend Setup**
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+### Running the Application
+
+#### Option 1: Use the startup script (Windows)
+```powershell
+# PowerShell
+.\start.ps1
+
+# Or Command Prompt
+start.bat
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+#### Option 2: Manual startup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Start Backend:**
+```bash
+cd backend
+python -m uvicorn main_simple:app --reload --port 8000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**Start Frontend:**
+```bash
+cd frontend
+npm start
+```
 
-## Learn More
+### Access the Application
 
-To learn more about Next.js, take a look at the following resources:
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Usage
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. **Upload Documents**: Use the document uploader to add invoices, shipments, or policy documents
+2. **Chat Interface**: Ask questions about your documents using natural language
+3. **View Anomalies**: Monitor detected anomalies in the dashboard
+4. **Analytics**: Review statistics and trends in your logistics data
 
-## Deploy on Vercel
+## API Endpoints
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `POST /api/query` - Query documents using natural language
+- `POST /api/ingest` - Upload and process documents
+- `GET /api/anomalies` - Retrieve detected anomalies
+- `GET /api/status` - Check system status
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Development
+
+### Backend Development
+The backend uses FastAPI with mock data for demonstration. For production use, integrate with:
+- Real document processing pipelines
+- Vector databases (Pinecone, Weaviate, etc.)
+- LLM services (OpenAI, Anthropic, etc.)
+
+### Frontend Development
+The React frontend is built with modern practices:
+- Component-based architecture
+- Custom hooks for API integration
+- Responsive design with Tailwind CSS
+- Real-time updates and error handling
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License.

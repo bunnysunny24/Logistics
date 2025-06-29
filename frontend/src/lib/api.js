@@ -12,8 +12,8 @@ const api = axios.create({
 export const queryLogisticsCopilot = async (query, context = {}) => {
   try {
     const response = await api.post('/api/query', {
-      query,
-      context,
+      message: query,
+      context: context,
     });
     return response.data;
   } catch (error) {
@@ -26,15 +26,12 @@ export const uploadDocument = async (file, docType, metadata = {}) => {
   const formData = new FormData();
   formData.append('file', file);
   
-  // Create document info object
-  const documentInfo = {
-    path: file.name,
-    type: docType,
-    metadata: metadata
-  };
-  
   try {
-    const response = await api.post('/api/ingest', documentInfo);
+    const response = await api.post('/api/ingest', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
     return response.data;
   } catch (error) {
     console.error('Error uploading document:', error);
