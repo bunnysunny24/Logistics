@@ -32,6 +32,17 @@ function DocumentUploader({ onUploadComplete }) {
       if (result.success) {
         setUploadStatus('success');
         setFile(null);
+        
+        // Automatically trigger anomaly detection after upload
+        try {
+          console.log('Triggering anomaly detection after successful upload...');
+          await apiService.triggerAnomalyDetection();
+          console.log('Anomaly detection triggered successfully');
+        } catch (detectionError) {
+          console.warn('Failed to trigger anomaly detection:', detectionError);
+          // Don't fail the upload just because detection failed
+        }
+        
         if (onUploadComplete) {
           onUploadComplete(result);
         }

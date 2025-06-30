@@ -427,12 +427,28 @@ class EnhancedAnomalyDetector:
         evidence = []
         
         for anomaly in self.anomalies:
-            if (anomaly.get("metadata", {}).get("supplier") == supplier and 
-                anomaly.get("metadata", {}).get("amount") == amount and
-                anomaly.get("metadata", {}).get("issue_date") == issue_date):
+            # Handle both AnomalyResult objects and dictionaries
+            if hasattr(anomaly, 'metadata'):
+                # AnomalyResult object
+                anomaly_supplier = anomaly.metadata.get("supplier") if anomaly.metadata else None
+                anomaly_amount = anomaly.metadata.get("amount") if anomaly.metadata else None
+                anomaly_issue_date = anomaly.metadata.get("issue_date") if anomaly.metadata else None
+                anomaly_doc_id = anomaly.document_id
+            elif isinstance(anomaly, dict):
+                # Dictionary format
+                anomaly_supplier = anomaly.get("metadata", {}).get("supplier")
+                anomaly_amount = anomaly.get("metadata", {}).get("amount")
+                anomaly_issue_date = anomaly.get("metadata", {}).get("issue_date")
+                anomaly_doc_id = anomaly.get("document_id")
+            else:
+                continue
+                
+            if (anomaly_supplier == supplier and 
+                anomaly_amount == amount and
+                anomaly_issue_date == issue_date):
                 
                 duplicate_risk = 0.85
-                evidence.append(f"Similar invoice found: {anomaly.get('document_id')}")
+                evidence.append(f"Similar invoice found: {anomaly_doc_id}")
                 break
         
         if duplicate_risk > 0.5:
@@ -880,30 +896,51 @@ class EnhancedAnomalyDetector:
         """Save anomalies to storage"""
         anomalies_file = f"{self.anomalies_dir}/anomalies.json"
         
-        # Convert AnomalyResult objects to dictionaries
+        # Convert AnomalyResult objects to dictionaries with proper type conversion
         anomaly_dicts = []
         for anomaly in anomalies:
-            anomaly_dict = {
-                "id": anomaly.id,
-                "document_id": anomaly.document_id,
-                "anomaly_type": anomaly.anomaly_type,
-                "risk_score": anomaly.risk_score,
-                "severity": anomaly.severity,
-                "description": anomaly.description,
-                "evidence": anomaly.evidence,
-                "recommendations": anomaly.recommendations,
-                "timestamp": anomaly.timestamp,
-                "metadata": anomaly.metadata
-            }
-            anomaly_dicts.append(anomaly_dict)
+            try:
+                if hasattr(anomaly, '__dict__'):
+                    # Convert AnomalyResult object to dict
+                    anomaly_dict = {
+                        "id": str(anomaly.id),
+                        "document_id": str(anomaly.document_id),
+                        "anomaly_type": str(anomaly.anomaly_type),
+                        "risk_score": float(anomaly.risk_score),
+                        "severity": str(anomaly.severity),
+                        "description": str(anomaly.description),
+                        "evidence": list(anomaly.evidence) if anomaly.evidence else [],
+                        "recommendations": list(anomaly.recommendations) if anomaly.recommendations else [],
+                        "timestamp": float(anomaly.timestamp),
+                        "metadata": dict(anomaly.metadata) if anomaly.metadata else {}
+                    }
+                    anomaly_dicts.append(anomaly_dict)
+                elif isinstance(anomaly, dict):
+                    # Already a dictionary, ensure proper types
+                    anomaly_dict = {
+                        "id": str(anomaly.get("id", "")),
+                        "document_id": str(anomaly.get("document_id", "")),
+                        "anomaly_type": str(anomaly.get("anomaly_type", "")),
+                        "risk_score": float(anomaly.get("risk_score", 0.0)),
+                        "severity": str(anomaly.get("severity", "")),
+                        "description": str(anomaly.get("description", "")),
+                        "evidence": list(anomaly.get("evidence", [])),
+                        "recommendations": list(anomaly.get("recommendations", [])),
+                        "timestamp": float(anomaly.get("timestamp", 0.0)),
+                        "metadata": dict(anomaly.get("metadata", {}))
+                    }
+                    anomaly_dicts.append(anomaly_dict)
+            except Exception as e:
+                logger.error(f"Error converting anomaly to dict: {e}")
+                continue
         
         # Add to existing anomalies
         self.anomalies.extend(anomaly_dicts)
         
         try:
             with open(anomalies_file, 'w') as f:
-                json.dump(self.anomalies, f, indent=2)
-            logger.info(f"Saved {len(anomalies)} new anomalies")
+                json.dump(self.anomalies, f, indent=2, default=str)
+            logger.info(f"Saved {len(anomaly_dicts)} new anomalies to {anomalies_file}")
         except Exception as e:
             logger.error(f"Error saving anomalies: {e}")
     
@@ -945,16 +982,33 @@ class EnhancedAnomalyDetector:
         }
         
         for anomaly in self.anomalies:
-            # Count by type
-            anomaly_type = anomaly.get("anomaly_type", "unknown")
-            summary["by_type"][anomaly_type] = summary["by_type"].get(anomaly_type, 0) + 1
-            
-            # Count by severity
-            severity = anomaly.get("severity", "unknown")
-            summary["by_severity"][severity] = summary["by_severity"].get(severity, 0) + 1
-            
-            # Count high-risk anomalies
-            if anomaly.get("risk_score", 0) >= 0.7:
-                summary["high_risk_count"] += 1
+            try:
+                # Handle both AnomalyResult objects and dictionaries
+                if hasattr(anomaly, 'anomaly_type'):
+                    # AnomalyResult object
+                    anomaly_type = anomaly.anomaly_type
+                    severity = anomaly.severity
+                    risk_score = anomaly.risk_score
+                elif isinstance(anomaly, dict):
+                    # Dictionary
+                    anomaly_type = anomaly.get("anomaly_type", "unknown")
+                    severity = anomaly.get("severity", "unknown")
+                    risk_score = anomaly.get("risk_score", 0.0)
+                else:
+                    continue
+                
+                # Count by type
+                summary["by_type"][anomaly_type] = summary["by_type"].get(anomaly_type, 0) + 1
+                
+                # Count by severity
+                summary["by_severity"][severity] = summary["by_severity"].get(severity, 0) + 1
+                
+                # Count high risk
+                if risk_score >= 0.8:
+                    summary["high_risk_count"] += 1
+                    
+            except Exception as e:
+                logger.error(f"Error processing anomaly in summary: {e}")
+                continue
         
         return summary

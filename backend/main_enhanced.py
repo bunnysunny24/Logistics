@@ -627,37 +627,51 @@ async def ingest_document(file: UploadFile = File(...)):
                 
                 # Add detected anomalies to the system
                 if detected_anomalies:
-                    anomaly_dicts = []
-                    for anomaly in detected_anomalies:
-                        anomaly_dict = {
-                            "id": anomaly.id,
-                            "document_id": anomaly.document_id,
-                            "anomaly_type": anomaly.anomaly_type,
-                            "risk_score": anomaly.risk_score,
-                            "severity": anomaly.severity,
-                            "description": anomaly.description,
-                            "evidence": anomaly.evidence,
-                            "recommendations": anomaly.recommendations,
-                            "timestamp": anomaly.timestamp,
-                            "metadata": {
-                                **anomaly.metadata, 
-                                "source": "uploaded_document", 
-                                "filename": file.filename,
-                                "upload_timestamp": datetime.now().isoformat()
-                            }
-                        }
-                        anomaly_dicts.append(anomaly_dict)
+                    # Add the anomalies to the detector's list for immediate availability
+                    anomaly_detector.anomalies.extend(detected_anomalies)
                     
-                    # Add to anomaly detector's list
-                    anomaly_detector.anomalies.extend(anomaly_dicts)
-                    logger.info(f"Added {len(anomaly_dicts)} anomalies from uploaded document to system")
-                    
-                    # Save to file
+                    # Save anomalies to persistent storage  
                     try:
                         anomaly_detector.save_anomalies(detected_anomalies)
-                        logger.info(f"Saved anomalies to file")
+                        logger.info(f"Saved {len(detected_anomalies)} anomalies to persistent storage")
                     except Exception as e:
-                        logger.warning(f"Could not save anomalies to file: {e}")
+                        logger.error(f"Failed to save anomalies: {e}")
+                    
+                    # Add anomaly details to RAG index for intelligent querying
+                    if rag_model:
+                        try:
+                            for anomaly in detected_anomalies:
+                                anomaly_content = f"""
+ANOMALY DETECTED:
+ID: {anomaly.id}
+Document: {anomaly.document_id}
+Type: {anomaly.anomaly_type}
+Severity: {anomaly.severity}
+Risk Score: {anomaly.risk_score}
+Description: {anomaly.description}
+Evidence: {' | '.join(anomaly.evidence)}
+Recommendations: {' | '.join(anomaly.recommendations)}
+Source: {file.filename}
+Timestamp: {datetime.fromtimestamp(anomaly.timestamp).isoformat()}
+"""
+                                rag_model.add_document_to_index(
+                                    content=anomaly_content,
+                                    doc_type="anomaly",
+                                    metadata={
+                                        "source": f"anomaly_{anomaly.id}",
+                                        "document_id": anomaly.document_id,
+                                        "anomaly_type": anomaly.anomaly_type,
+                                        "severity": anomaly.severity,
+                                        "risk_score": anomaly.risk_score,
+                                        "filename": file.filename,
+                                        "upload_timestamp": datetime.now().isoformat()
+                                    }
+                                )
+                            logger.info(f"Added {len(detected_anomalies)} anomalies to RAG index")
+                        except Exception as e:
+                            logger.error(f"Failed to add anomalies to RAG index: {e}")
+                    
+                    logger.info(f"Processed {len(detected_anomalies)} anomalies from uploaded document")
                         
             except Exception as e:
                 logger.error(f"Error in anomaly detection for uploaded document: {e}")
@@ -678,28 +692,45 @@ async def ingest_document(file: UploadFile = File(...)):
                             detected_anomalies.extend(anomalies)
                     
                     if detected_anomalies:
-                        anomaly_dicts = []
-                        for anomaly in detected_anomalies:
-                            anomaly_dict = {
-                                "id": anomaly.id,
-                                "document_id": anomaly.document_id,
-                                "anomaly_type": anomaly.anomaly_type,
-                                "risk_score": anomaly.risk_score,
-                                "severity": anomaly.severity,
-                                "description": anomaly.description,
-                                "evidence": anomaly.evidence,
-                                "recommendations": anomaly.recommendations,
-                                "timestamp": anomaly.timestamp,
-                                "metadata": {
-                                    **anomaly.metadata, 
-                                    "source": "uploaded_pdf_extraction", 
-                                    "filename": file.filename
-                                }
-                            }
-                            anomaly_dicts.append(anomaly_dict)
+                        # Add to anomaly detector's list
+                        anomaly_detector.anomalies.extend(detected_anomalies)
                         
-                        anomaly_detector.anomalies.extend(anomaly_dicts)
-                        logger.info(f"Added {len(anomaly_dicts)} anomalies from PDF text extraction")
+                        # Add to RAG index
+                        if rag_model:
+                            try:
+                                for anomaly in detected_anomalies:
+                                    anomaly_content = f"""
+ANOMALY DETECTED FROM PDF:
+ID: {anomaly.id}
+Document: {anomaly.document_id}
+Type: {anomaly.anomaly_type}
+Severity: {anomaly.severity}
+Risk Score: {anomaly.risk_score}
+Description: {anomaly.description}
+Evidence: {' | '.join(anomaly.evidence)}
+Recommendations: {' | '.join(anomaly.recommendations)}
+Source: {file.filename} (PDF extraction)
+Timestamp: {datetime.fromtimestamp(anomaly.timestamp).isoformat()}
+"""
+                                    rag_model.add_document_to_index(
+                                        content=anomaly_content,
+                                        doc_type="anomaly",
+                                        metadata={
+                                            "source": f"pdf_anomaly_{anomaly.id}",
+                                            "document_id": anomaly.document_id,
+                                            "anomaly_type": anomaly.anomaly_type,
+                                            "severity": anomaly.severity,
+                                            "risk_score": anomaly.risk_score,
+                                            "filename": file.filename,
+                                            "extraction_type": "pdf",
+                                            "upload_timestamp": datetime.now().isoformat()
+                                        }
+                                    )
+                                logger.info(f"Added {len(detected_anomalies)} PDF anomalies to RAG index")
+                            except Exception as e:
+                                logger.error(f"Failed to add PDF anomalies to RAG index: {e}")
+                        
+                        logger.info(f"Added {len(detected_anomalies)} anomalies from PDF text extraction")
                         
                 except Exception as e:
                     logger.error(f"Error in PDF text anomaly detection: {e}")
@@ -861,12 +892,9 @@ async def get_anomalies(
     anomaly_type: Optional[str] = None,
     severity: Optional[str] = None
 ):
-    """Get detected anomalies with filtering"""
+    """Get detected anomalies with filtering - prioritize real data over mock data"""
     try:
-        # Always return mock anomalies for now to ensure frontend works
-        mock_anomalies = _get_mock_anomalies()
-        
-        # If anomaly_detector is available, get real anomalies too
+        # If anomaly_detector is available, get real anomalies first
         real_anomalies = []
         if anomaly_detector and hasattr(anomaly_detector, 'anomalies'):
             try:
@@ -901,8 +929,14 @@ async def get_anomalies(
                 print(f"Error getting real anomalies: {e}")
                 real_anomalies = []
         
-        # Combine all anomalies
-        all_anomalies = mock_anomalies + real_anomalies
+        # Only use mock anomalies if no real anomalies are available
+        if len(real_anomalies) == 0:
+            logger.info("No real anomalies found, using mock data for demonstration")
+            mock_anomalies = _get_mock_anomalies()
+            all_anomalies = mock_anomalies
+        else:
+            logger.info(f"Found {len(real_anomalies)} real anomalies")
+            all_anomalies = real_anomalies
         
         # Apply filters
         filtered_anomalies = []
@@ -1158,7 +1192,8 @@ async def clear_conversation_memory():
 
 @app.post("/api/detect-anomalies")
 async def trigger_anomaly_detection():
-    """Manually trigger anomaly detection on existing data"""
+    """Manually trigger anomaly detection on all available data"""
+    print("🚨 TRIGGER FUNCTION CALLED - VERSION 2.0 🚨")
     try:
         if not anomaly_detector:
             return {
@@ -1170,246 +1205,329 @@ async def trigger_anomaly_detection():
         
         print("🔍 Manual anomaly detection triggered...")
         detected_anomalies = []
+        initial_count = len(anomaly_detector.anomalies) if anomaly_detector.anomalies else 0
+        print(f"📊 Starting with {initial_count} existing anomalies")
         
-        # Process comprehensive invoice file
-        invoices_file = os.path.join(DATA_DIR, "invoices", "comprehensive_invoices.csv")
-        if os.path.exists(invoices_file):
-            try:
-                print(f"📄 Processing: {invoices_file}")
-                df = pd.read_csv(invoices_file)
-                print(f"📊 Found {len(df)} rows in invoice file")
-                
-                for _, row in df.iterrows():
-                    invoice_data = row.to_dict()
-                    # Convert any NaN values to None
-                    invoice_data = {k: (v if pd.notna(v) else None) for k, v in invoice_data.items()}
-                    
-                    # Skip invalid rows
-                    if not invoice_data.get('invoice_id') or invoice_data.get('invoice_id') in ['item', 'invoice_id']:
-                        continue
-                    
-                    print(f"   Processing: {invoice_data.get('invoice_id')} - ${invoice_data.get('amount')}")
-                    
-                    try:
-                        anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
-                        detected_anomalies.extend(anomalies)
-                        print(f"   Found {len(anomalies)} anomalies")
-                        
-                        for anomaly in anomalies:
-                            print(f"     - {anomaly.anomaly_type}: {anomaly.description}")
-                    except Exception as e:
-                        print(f"   Error processing invoice {invoice_data.get('invoice_id')}: {e}")
-                        continue
-            except Exception as e:
-                print(f"Error processing invoice file: {e}")
-                return {
-                    "success": False,
-                    "message": f"Error processing invoice file: {str(e)}",
-                    "anomalies": 0
-                }
+        # DON'T clear existing anomalies - we want to add to them
+        # anomaly_detector.anomalies = []  # Commented out to preserve existing anomalies
         
-        # Process uploaded PDF documents for anomaly detection
+        # Process all uploaded files first (highest priority)
         uploads_dir = os.path.join(DATA_DIR, "uploads")
         if os.path.exists(uploads_dir):
             for filename in os.listdir(uploads_dir):
-                if filename.endswith('.pdf'):
+                file_path = os.path.join(uploads_dir, filename)
+                
+                if filename.endswith('.csv'):
                     try:
-                        file_path = os.path.join(uploads_dir, filename)
-                        print(f"📄 Processing uploaded PDF: {filename}")
+                        print(f"📄 Processing uploaded CSV: {filename}")
+                        df = pd.read_csv(file_path)
+                        print(f"📊 Found {len(df)} rows in uploaded CSV")
                         
-                        # Extract text from PDF
+                        # Determine if it's invoice or shipment data based on columns
+                        doc_type = "invoice" if "invoice_id" in df.columns else "shipment"
+                        
+                        for _, row in df.iterrows():
+                            record_data = row.to_dict()
+                            # Convert any NaN values to None
+                            record_data = {k: (v if pd.notna(v) else None) for k, v in record_data.items()}
+                            
+                            # Skip invalid rows
+                            id_field = f"{doc_type}_id"
+                            if not record_data.get(id_field) or str(record_data.get(id_field)).strip() in ['', id_field, 'item']:
+                                continue
+                            
+                            print(f"   Processing: {record_data.get(id_field)}")
+                            
+                            try:
+                                if doc_type == "invoice":
+                                    anomalies = anomaly_detector.detect_invoice_anomalies(record_data)
+                                else:
+                                    anomalies = anomaly_detector.detect_shipment_anomalies(record_data)
+                                
+                                detected_anomalies.extend(anomalies)
+                                print(f"   Found {len(anomalies)} anomalies")
+                                
+                                for anomaly in anomalies:
+                                    print(f"     - {anomaly.anomaly_type}: {anomaly.description}")
+                            except Exception as e:
+                                print(f"   Error processing record {record_data.get(id_field)}: {e}")
+                                continue
+                                
+                    except Exception as e:
+                        print(f"Error processing uploaded CSV {filename}: {e}")
+                        continue
+                        
+                elif filename.endswith('.pdf'):
+                    try:
+                        print(f"📄 Processing uploaded PDF: {filename}")
+                        # Extract text from PDF and look for structured data
                         if document_processor:
                             extracted_text = document_processor.extract_text_from_pdf(file_path)
-                            if extracted_text:
-                                # Try to extract structured data for anomaly detection
-                                # This is a simple approach - in production you'd have more sophisticated parsing
-                                doc_type = "invoice" if "invoice" in filename.lower() else "shipment"
-                                
-                                # Create a document data structure for anomaly detection
-                                document_data = {
-                                    "document_id": filename.replace('.pdf', ''),
-                                    "type": doc_type,
-                                    "content": extracted_text,
-                                    "source": "uploaded_pdf",
-                                    "timestamp": datetime.now().timestamp()
-                                }
-                                
-                                # For now, just log that we processed it
-                                # In production, you'd extract specific fields and run anomaly detection
-                                print(f"   Extracted {len(extracted_text)} characters from {filename}")
+                            print(f"Extracted {len(extracted_text)} characters from PDF")
+                            
+                            # Try to extract invoice data from PDF text for anomaly detection
+                            if len(extracted_text) > 0:
+                                invoice_data = _extract_invoice_data_from_text(extracted_text, filename)
+                                if invoice_data:
+                                    print(f"   Extracted invoice data: {invoice_data.get('invoice_id', 'unknown')} - ${invoice_data.get('amount', 0)}")
+                                    try:
+                                        anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
+                                        detected_anomalies.extend(anomalies)
+                                        print(f"   Found {len(anomalies)} anomalies from PDF")
+                                        
+                                        for anomaly in anomalies:
+                                            print(f"     - {anomaly.anomaly_type}: {anomaly.description}")
+                                    except Exception as e:
+                                        print(f"   Error detecting anomalies from PDF {filename}: {e}")
+                                else:
+                                    print(f"   Could not extract structured invoice data from PDF")
+                            else:
+                                print(f"   No text extracted from PDF")
+                        
                     except Exception as e:
                         print(f"Error processing uploaded PDF {filename}: {e}")
+                        continue
         
-        # Save results if any found
+        # Process comprehensive data files if no uploaded files processed
+        if len(detected_anomalies) == 0:
+            print("No anomalies from uploaded files, processing comprehensive data...")
+            
+            # Process comprehensive invoice file
+            invoices_file = os.path.join(DATA_DIR, "invoices", "comprehensive_invoices.csv")
+            if os.path.exists(invoices_file):
+                try:
+                    print(f"📄 Processing: {invoices_file}")
+                    df = pd.read_csv(invoices_file)
+                    print(f"📊 Found {len(df)} rows in invoice file")
+                    
+                    for _, row in df.iterrows():
+                        invoice_data = row.to_dict()
+                        # Convert any NaN values to None
+                        invoice_data = {k: (v if pd.notna(v) else None) for k, v in invoice_data.items()}
+                        
+                        # Skip invalid rows
+                        if not invoice_data.get('invoice_id') or invoice_data.get('invoice_id') in ['item', 'invoice_id']:
+                            continue
+                        
+                        print(f"   Processing: {invoice_data.get('invoice_id')} - ${invoice_data.get('amount')}")
+                        
+                        try:
+                            anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
+                            detected_anomalies.extend(anomalies)
+                            print(f"   Found {len(anomalies)} anomalies")
+                            
+                            for anomaly in anomalies:
+                                print(f"     - {anomaly.anomaly_type}: {anomaly.description}")
+                        except Exception as e:
+                            print(f"   Error processing invoice {invoice_data.get('invoice_id')}: {e}")
+                            continue
+                except Exception as e:
+                    print(f"Error processing invoice file: {e}")
+            
+            # Process comprehensive shipment file
+            shipments_file = os.path.join(DATA_DIR, "shipments", "comprehensive_shipments.csv")
+            if os.path.exists(shipments_file):
+                try:
+                    print(f"📄 Processing: {shipments_file}")
+                    df = pd.read_csv(shipments_file)
+                    print(f"📊 Found {len(df)} rows in shipment file")
+                    
+                    for _, row in df.iterrows():
+                        shipment_data = row.to_dict()
+                        # Convert any NaN values to None
+                        shipment_data = {k: (v if pd.notna(v) else None) for k, v in shipment_data.items()}
+                        
+                        # Skip invalid rows
+                        if not shipment_data.get('shipment_id') or shipment_data.get('shipment_id') in ['item', 'shipment_id']:
+                            continue
+                        
+                        print(f"   Processing: {shipment_data.get('shipment_id')}")
+                        
+                        try:
+                            anomalies = anomaly_detector.detect_shipment_anomalies(shipment_data)
+                            detected_anomalies.extend(anomalies)
+                            print(f"   Found {len(anomalies)} anomalies")
+                            
+                            for anomaly in anomalies:
+                                print(f"     - {anomaly.anomaly_type}: {anomaly.description}")
+                        except Exception as e:
+                            print(f"   Error processing shipment {shipment_data.get('shipment_id')}: {e}")
+                            continue
+                except Exception as e:
+                    print(f"Error processing shipment file: {e}")
+        
+        # Update the detector's anomaly list by adding new anomalies to existing ones
         if detected_anomalies:
-            # Convert AnomalyResult objects to dictionaries for storage
-            anomaly_dicts = []
+            # Ensure all anomalies are properly formatted as dictionaries for storage
+            clean_anomalies = []
             for anomaly in detected_anomalies:
-                anomaly_dict = {
-                    "id": anomaly.id,
-                    "document_id": anomaly.document_id,
-                    "anomaly_type": anomaly.anomaly_type,
-                    "risk_score": anomaly.risk_score,
-                    "severity": anomaly.severity,
-                    "description": anomaly.description,
-                    "evidence": anomaly.evidence,
-                    "recommendations": anomaly.recommendations,
-                    "timestamp": anomaly.timestamp,
-                    "metadata": anomaly.metadata
-                }
-                anomaly_dicts.append(anomaly_dict)
+                try:
+                    if hasattr(anomaly, '__dict__'):
+                        # Convert AnomalyResult object to dict
+                        clean_anomaly = {
+                            "id": str(anomaly.id),
+                            "document_id": str(anomaly.document_id),
+                            "anomaly_type": str(anomaly.anomaly_type),
+                            "risk_score": float(anomaly.risk_score),
+                            "severity": str(anomaly.severity),
+                            "description": str(anomaly.description),
+                            "evidence": list(anomaly.evidence) if anomaly.evidence else [],
+                            "recommendations": list(anomaly.recommendations) if anomaly.recommendations else [],
+                            "timestamp": float(anomaly.timestamp),
+                            "metadata": dict(anomaly.metadata) if anomaly.metadata else {}
+                        }
+                        clean_anomalies.append(clean_anomaly)
+                    elif isinstance(anomaly, dict):
+                        # Already a dictionary, just ensure proper types
+                        clean_anomaly = {
+                            "id": str(anomaly.get("id", "")),
+                            "document_id": str(anomaly.get("document_id", "")),
+                            "anomaly_type": str(anomaly.get("anomaly_type", "")),
+                            "risk_score": float(anomaly.get("risk_score", 0.0)),
+                            "severity": str(anomaly.get("severity", "")),
+                            "description": str(anomaly.get("description", "")),
+                            "evidence": list(anomaly.get("evidence", [])),
+                            "recommendations": list(anomaly.get("recommendations", [])),
+                            "timestamp": float(anomaly.get("timestamp", 0.0)),
+                            "metadata": dict(anomaly.get("metadata", {}))
+                        }
+                        clean_anomalies.append(clean_anomaly)
+                except Exception as e:
+                    print(f"Warning: Error cleaning anomaly: {e}")
+                    continue
             
-            # Save to the in-memory anomalies list
-            anomaly_detector.anomalies.extend(anomaly_dicts)
+            # Add the new cleaned anomalies to existing ones (don't replace)
+            if anomaly_detector.anomalies is None:
+                anomaly_detector.anomalies = []
             
-            # Also save to file
+            anomaly_detector.anomalies.extend(clean_anomalies)
+            total_anomalies = len(anomaly_detector.anomalies)
+            print(f"✅ Added {len(clean_anomalies)} new anomalies. Total now: {total_anomalies}")
+            
+            # Save to persistent storage
             try:
+                # Pass the original detected_anomalies since save_anomalies handles conversion
                 anomaly_detector.save_anomalies(detected_anomalies)
+                print(f"✅ Saved {len(detected_anomalies)} new anomalies to storage")
             except Exception as e:
-                print(f"Warning: Could not save anomalies to file: {e}")
-            
-            return {
-                "success": True,
-                "message": f"Detected {len(detected_anomalies)} anomalies",
-                "anomalies": len(detected_anomalies),
-                "details": {
-                    "high_risk": len([a for a in detected_anomalies if a.risk_score >= 0.8]),
-                    "medium_risk": len([a for a in detected_anomalies if 0.5 <= a.risk_score < 0.8]),
-                    "low_risk": len([a for a in detected_anomalies if a.risk_score < 0.5])
-                },
-                "sample_anomalies": [
-                    {
-                        "id": a.id,
-                        "type": a.anomaly_type,
-                        "description": a.description,
-                        "risk_score": a.risk_score,
-                        "severity": a.severity
-                    } for a in detected_anomalies[:5]
-                ]
-            }
+                print(f"Warning: Could not save anomalies: {e}")
         else:
-            return {
-                "success": True,
-                "message": "No new anomalies detected",
-                "anomalies": 0,
-                "details": {
-                    "high_risk": 0,
-                    "medium_risk": 0,
-                    "low_risk": 0
-                }
-            }
-    
+            total_anomalies = len(anomaly_detector.anomalies) if anomaly_detector.anomalies else 0
+            print(f"📊 No new anomalies detected. Total remains: {total_anomalies}")
+            
+        # Add all detected anomalies to RAG index for intelligent querying (moved outside if/else)
+        if detected_anomalies and rag_model:
+            try:
+                for anomaly in detected_anomalies:
+                        # Handle both object and dict types
+                        if hasattr(anomaly, 'id'):
+                            # AnomalyResult object
+                            anomaly_content = f"""
+ANOMALY DETECTED:
+ID: {anomaly.id}
+Document: {anomaly.document_id}
+Type: {anomaly.anomaly_type}
+Severity: {anomaly.severity}
+Risk Score: {anomaly.risk_score}
+Description: {anomaly.description}
+Evidence: {' | '.join(anomaly.evidence)}
+Recommendations: {' | '.join(anomaly.recommendations)}
+Detection Trigger: Manual/Batch Detection
+Timestamp: {datetime.fromtimestamp(anomaly.timestamp).isoformat()}
+"""
+                            rag_model.add_document_to_index(
+                                content=anomaly_content,
+                                doc_type="anomaly",
+                                metadata={
+                                    "source": f"batch_anomaly_{anomaly.id}",
+                                    "document_id": anomaly.document_id,
+                                    "anomaly_type": anomaly.anomaly_type,
+                                    "severity": anomaly.severity,
+                                    "risk_score": anomaly.risk_score,
+                                    "detection_type": "batch",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                            )
+                        elif isinstance(anomaly, dict):
+                            # Dictionary format
+                            anomaly_content = f"""
+ANOMALY DETECTED:
+ID: {anomaly.get('id', 'unknown')}
+Document: {anomaly.get('document_id', 'unknown')}
+Type: {anomaly.get('anomaly_type', 'unknown')}
+Severity: {anomaly.get('severity', 'unknown')}
+Risk Score: {anomaly.get('risk_score', 0)}
+Description: {anomaly.get('description', 'No description')}
+Evidence: {' | '.join(anomaly.get('evidence', []))}
+Recommendations: {' | '.join(anomaly.get('recommendations', []))}
+Detection Trigger: Manual/Batch Detection
+Timestamp: {datetime.fromtimestamp(anomaly.get('timestamp', 0)).isoformat()}
+"""
+                            rag_model.add_document_to_index(
+                                content=anomaly_content,
+                                doc_type="anomaly",
+                                metadata={
+                                    "source": f"batch_anomaly_{anomaly.get('id', 'unknown')}",
+                                    "document_id": anomaly.get('document_id', 'unknown'),
+                                    "anomaly_type": anomaly.get('anomaly_type', 'unknown'),
+                                    "severity": anomaly.get('severity', 'unknown'),
+                                    "risk_score": anomaly.get('risk_score', 0),
+                                    "detection_type": "batch",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                            )
+                print(f"✅ Added {len(detected_anomalies)} anomalies to RAG index")
+            except Exception as e:
+                print(f"Warning: Could not add anomalies to RAG index: {e}")
+        
+        # Calculate summary statistics properly handling both object and dict types
+        # Use all anomalies in the detector (existing + newly detected)
+        all_anomalies = anomaly_detector.anomalies if anomaly_detector.anomalies else []
+        print(f"🔍 Debug: all_anomalies count = {len(all_anomalies)}")
+        print(f"🔍 Debug: detected_anomalies count = {len(detected_anomalies)}")
+        
+        summary_stats = {"total": len(all_anomalies), "high_risk": 0, "medium_risk": 0, "low_risk": 0, "new_anomalies": len(detected_anomalies)}
+        
+        for anomaly in all_anomalies:
+            try:
+                # Get risk score handling both object and dict types
+                if hasattr(anomaly, 'risk_score'):
+                    risk_score = float(anomaly.risk_score)
+                elif isinstance(anomaly, dict):
+                    risk_score = float(anomaly.get('risk_score', 0))
+                else:
+                    risk_score = 0.0
+                
+                # Categorize by risk level
+                if risk_score >= 0.8:
+                    summary_stats["high_risk"] += 1
+                elif risk_score >= 0.5:
+                    summary_stats["medium_risk"] += 1
+                else:
+                    summary_stats["low_risk"] += 1
+            except Exception as e:
+                print(f"Warning: Error calculating risk for anomaly: {e}")
+                summary_stats["low_risk"] += 1  # Default to low risk if can't determine
+        
+        print(f"📊 Summary calculated: {summary_stats}")
+        
+        return {
+            "success": True,
+            "message": f"Anomaly detection completed successfully. Added {len(detected_anomalies)} new anomalies.",
+            "anomalies": len(detected_anomalies),
+            "total_anomalies": len(all_anomalies),
+            "summary": summary_stats
+        }
+        
     except Exception as e:
-        error_msg = f"Error in anomaly detection: {str(e)}"
-        print(f"❌ {error_msg}")
+        print(f"❌ Error in anomaly detection: {e}")
         return {
             "success": False,
-            "message": error_msg,
+            "message": f"Anomaly detection failed: {str(e)}",
             "error": str(e),
             "anomalies": 0
         }
 
-@app.post("/api/detect-anomalies")
-async def force_anomaly_detection():
-    """Force anomaly detection on all data files"""
-    try:
-        if not anomaly_detector:
-            return {"success": False, "message": "Anomaly detector not available", "anomalies": 0 }
-        
-        # Clear existing anomalies
-        anomaly_detector.anomalies = []
-        print("🔍 Manual anomaly detection triggered...")
-        
-        # Reload historical data to ensure clean baselines
-        anomaly_detector.load_historical_data()
-        print("📊 Historical data reloaded")
-        
-        # Force detection on comprehensive files for flagged items
-        detected_count = 0
-        
-        # Process comprehensive invoice file for flagged invoices
-        comprehensive_invoice_file = os.path.join(DATA_DIR, "invoices", "comprehensive_invoices.csv")
-        print(f"📁 Checking comprehensive invoice file: {comprehensive_invoice_file}")
-        
-        if os.path.exists(comprehensive_invoice_file):
-            try:
-                df = pd.read_csv(comprehensive_invoice_file)
-                print(f"📋 Loaded {len(df)} total invoices")
-                # Look for flagged invoices
-                flagged_invoices = df[df['status'] == 'flagged']
-                print(f"🚩 Found {len(flagged_invoices)} flagged invoices")
-                
-                for _, row in flagged_invoices.iterrows():
-                    invoice_data = row.to_dict()
-                    print(f"🔍 Processing flagged invoice: {invoice_data}")
-                    anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
-                    detected_count += len(anomalies)
-                    print(f"Processing flagged invoice {invoice_data.get('invoice_id')}: Found {len(anomalies)} anomalies")
-                    
-                    # Add to detector's anomalies list - convert AnomalyResult objects to dicts
-                    for anomaly in anomalies:
-                        anomaly_dict = {
-                            "id": anomaly.id,
-                            "document_id": anomaly.document_id,
-                            "anomaly_type": anomaly.anomaly_type,
-                            "risk_score": anomaly.risk_score,
-                            "severity": anomaly.severity,
-                            "description": anomaly.description,
-                            "evidence": anomaly.evidence,
-                            "recommendations": anomaly.recommendations,
-                            "timestamp": anomaly.timestamp,
-                            "metadata": anomaly.metadata
-                        }
-                        anomaly_detector.anomalies.append(anomaly_dict)
-                    
-            except Exception as e:
-                print(f"Error processing comprehensive invoices: {e}")
-        else:
-            print("❌ Comprehensive invoice file not found")
-        
-        print(f"✅ Detection complete. Found {detected_count} anomalies total.")
-        
-        # Also process individual abnormal files
-        abnormal_invoices = ["invoice_004_abnormal.csv"]
-        for filename in abnormal_invoices:
-            file_path = os.path.join(DATA_DIR, "invoices", filename)
-            if os.path.exists(file_path):
-                try:
-                    df = pd.read_csv(file_path)
-                    for _, row in df.iterrows():
-                        invoice_data = row.to_dict()
-                        # Skip header/item rows
-                        if invoice_data.get('invoice_id') and not invoice_data.get('invoice_id') in ['item', 'invoice_id']:
-                            anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
-                            detected_count += len(anomalies)
-                            print(f"Processing abnormal invoice {invoice_data.get('invoice_id')}: Found {len(anomalies)} anomalies")
-                except Exception as e:
-                    print(f"Error processing {filename}: {e}")
-        
-        # Process abnormal shipment files
-        abnormal_shipments = ["shipment_003_abnormal.csv", "shipment_004_abnormal.csv"]
-        for filename in abnormal_shipments:
-            file_path = os.path.join(DATA_DIR, "shipments", filename)
-            if os.path.exists(file_path):
-                try:
-                    df = pd.read_csv(file_path)
-                    for _, row in df.iterrows():
-                        shipment_data = row.to_dict()
-                        # Skip header/item rows
-                        if shipment_data.get('shipment_id') and not shipment_data.get('shipment_id') in ['item', 'shipment_id']:
-                            anomalies = anomaly_detector.detect_shipment_anomalies(shipment_data)
-                            detected_count += len(anomalies)
-                except Exception as e:
-                    print(f"Error processing {filename}: {e}")
-        
-        return {
-            "success": True,
-            "message": f"Detected {detected_count} anomalies" if detected_count > 0 else "No anomalies detected",
-            "anomalies": detected_count
-        }
-        
-    except Exception as e:
-        return {"success": False, "message": f"Error during detection: {str(e)}", "anomalies": 0}
 
 def _get_mock_response(query: str) -> QueryResponse:
     """Generate mock response when RAG model is not available"""

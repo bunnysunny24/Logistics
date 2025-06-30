@@ -1,0 +1,6 @@
+invoice_id,supplier,amount,payment_terms,due_date,status,approval_status
+INV-TEST-001,Test Supplier Inc,15000.00,NET30,2025-01-30,pending,pending
+INV-TEST-002,ABC Electronics,2500.50,NET15,2025-01-15,paid,approved
+INV-TEST-003,Suspicious Vendor,99999.99,NET1,2025-01-01,pending,pending
+INV-TEST-004,Problem Supplier Inc,25000.00,NET60,2025-02-28,pending,pending
+INV-TEST-005,Global Tech,1200.00,NET30,2025-01-30,pending,approved

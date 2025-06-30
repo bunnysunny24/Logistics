@@ -71,18 +71,38 @@ function AnomalyDashboard() {
         // Reload anomalies after detection
         await loadAnomalies();
         
-        // Show success message
-        alert(`Detection complete! Found ${result.anomalies} anomalies.`);
+        // Show success message with details
+        const summary = result.summary || {};
+        alert(`Detection complete! Found ${result.anomalies} anomalies:\n` +
+              `• High Risk: ${summary.high_risk || 0}\n` +
+              `• Medium Risk: ${summary.medium_risk || 0}\n` +
+              `• Low Risk: ${summary.low_risk || 0}`);
       } else {
         alert(`Detection failed: ${result.message}`);
       }
     } catch (err) {
       console.error('Error triggering detection:', err);
-      alert('Failed to trigger anomaly detection.');
+      alert('Failed to trigger anomaly detection. Please check if the backend is running.');
     } finally {
       setIsDetecting(false);
     }
   };
+
+  // Add a refresh function that can be called externally
+  const refreshAnomalies = async () => {
+    await loadAnomalies();
+  };
+
+  // Auto-refresh every 30 seconds to catch new uploads
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!loading && !isDetecting) {
+        loadAnomalies();
+      }
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [loading, isDetecting]);
 
   const handleFilterChange = (field, value) => {
     setFilters(prev => ({
