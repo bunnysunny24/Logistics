@@ -16,7 +16,9 @@ import {
   FaShieldAlt
 } from 'react-icons/fa';
 
-function DashboardPage({ refreshTrigger, onDocumentUploaded, onRefreshData, systemStatus }) {
+function DashboardPage() {
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [systemStatus, setSystemStatus] = useState({ status: 'operational' });
   const [stats, setStats] = useState({
     totalDocuments: 0,
     totalAnomalies: 0,
@@ -24,6 +26,16 @@ function DashboardPage({ refreshTrigger, onDocumentUploaded, onRefreshData, syst
     processingRate: 0
   });
   const [loading, setLoading] = useState(true);
+
+  const handleDocumentUploaded = () => {
+    // Trigger a refresh of the dashboard components
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  const handleRefreshData = () => {
+    // Trigger a refresh of all data
+    setRefreshTrigger(prev => prev + 1);
+  };
 
   // Load dashboard statistics
   useEffect(() => {
@@ -211,7 +223,7 @@ function DashboardPage({ refreshTrigger, onDocumentUploaded, onRefreshData, syst
                 </div>
               </div>
               <div className="p-6">
-                <DocumentUploader onUploadComplete={onDocumentUploaded} />
+                <DocumentUploader onUploadComplete={handleDocumentUploaded} />
               </div>
             </div>
           </ErrorBoundary>
@@ -251,7 +263,7 @@ function DashboardPage({ refreshTrigger, onDocumentUploaded, onRefreshData, syst
                       <span className="text-sm text-orange-600 font-semibold">Monitoring</span>
                     </div>
                     <button
-                      onClick={onRefreshData}
+                      onClick={handleRefreshData}
                       className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all duration-300 font-semibold shadow-lg hover:shadow-xl transform hover:scale-105"
                     >
                       Refresh
