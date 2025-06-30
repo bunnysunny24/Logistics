@@ -29,11 +29,13 @@ try:
     from models.rag_model import LogisticsPulseRAG
     from pipeline.enhanced_anomaly_detector import EnhancedAnomalyDetector
     from utils.document_processor import PDFProcessor
+    from pathway_realtime_rag import PathwayRealtimeRAG
 except ImportError as e:
     print(f"Warning: Could not import components: {e}")
     LogisticsPulseRAG = None
     EnhancedAnomalyDetector = None
     PDFProcessor = None
+    PathwayRealtimeRAG = None
 
 # Load environment variables
 load_dotenv()
@@ -50,11 +52,27 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
 # Initialize components
+pathway_rag = None
+try:
+    if PathwayRealtimeRAG:
+        try:
+            pathway_rag = PathwayRealtimeRAG(data_dir=DATA_DIR)
+            print("✅ Pathway Real-Time RAG initialized successfully")
+            # Start the streaming pipeline
+            pathway_rag.start_streaming()
+            print("✅ Pathway streaming pipeline started")
+        except Exception as e:
+            print(f"❌ Error initializing Pathway RAG: {e}")
+            pathway_rag = None
+    else:
+        print("⚠️ Pathway RAG class not available")
+
 try:
     if LogisticsPulseRAG:
         try:
-            rag_model = LogisticsPulseRAG()
-            print("✅ RAG model initialized successfully")
+            # Initialize with Pathway integration if available
+            rag_model = LogisticsPulseRAG(pathway_manager=pathway_rag, use_pathway_streaming=True)
+            print("✅ RAG model initialized successfully with Pathway streaming")
             
             # Initialize Causal RAG system
             try:

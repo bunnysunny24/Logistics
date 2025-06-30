@@ -18,12 +18,17 @@ from models.local_llm import LocalHuggingFaceLLM
 class LogisticsPulseRAG:
     # In backend/models/rag_model.py - update the __init__ method
 
-    def __init__(self):
+    def __init__(self, pathway_manager=None, use_pathway_streaming=False):
         # Load environment variables - fully local setup
         self.llm_model = os.getenv("LLM_MODEL", "local")
         self.embedding_model = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
         self.index_dir = os.getenv("INDEX_DIR", "./data/index")
         self.data_dir = os.getenv("DATA_DIR", "./data")
+        
+        # Pathway integration for real-time streaming
+        self.pathway_manager = pathway_manager
+        self.pathway_enabled = pathway_manager is not None and use_pathway_streaming
+        self.use_pathway_streaming = use_pathway_streaming
         
         # Real-time monitoring attributes
         self.last_policy_update = datetime.now()
@@ -31,7 +36,7 @@ class LogisticsPulseRAG:
         self.compliance_rules_cache = {}
         
         # Initialize with local models only
-        logger.info("Initializing fully local RAG system - no external API dependencies")
+        logger.info("Initializing fully local RAG system with Pathway streaming - no external API dependencies")
         
         # Use local models exclusively
         try:
@@ -621,6 +626,129 @@ with a risk score of {risk_desc}.
             logger.error(f"Error in response generation: {e}")
             return self._generate_error_response(query, str(e))
     
+    def process_query_multiple_answers(self, query, context=None, num_answers=3):
+        """Generate multiple distinct answers for the same query using different approaches"""
+        start_time = time.time()
+        
+        if context is None:
+            context = {}
+            
+        # Define different answer perspectives/approaches
+        answer_approaches = [
+            {
+                "name": "Detailed Analysis",
+                "prompt_modifier": "Provide a comprehensive detailed analysis with specific data points and metrics.",
+                "focus": "detailed"
+            },
+            {
+                "name": "Risk Assessment", 
+                "prompt_modifier": "Focus on risk factors, potential impacts, and security implications.",
+                "focus": "risk"
+            },
+            {
+                "name": "Actionable Insights",
+                "prompt_modifier": "Emphasize practical recommendations and immediate next steps.",
+                "focus": "action"
+            },
+            {
+                "name": "Pattern Analysis",
+                "prompt_modifier": "Analyze patterns, trends, and comparative insights across the data.",
+                "focus": "patterns"
+            },
+            {
+                "name": "Compliance Perspective",
+                "prompt_modifier": "Focus on compliance requirements, regulatory aspects, and policy adherence.",
+                "focus": "compliance"
+            }
+        ]
+        
+        # Generate multiple answers
+        answers = []
+        
+        for i, approach in enumerate(answer_approaches[:num_answers]):
+            try:
+                # Modify the query context for this approach
+                modified_context = context.copy()
+                modified_context["answer_focus"] = approach["focus"]
+                modified_context["perspective"] = approach["name"]
+                
+                # Create a focused query
+                focused_query = f"{query}\n\nPerspective: {approach['prompt_modifier']}"
+                
+                # Get standard response first
+                standard_result = self.process_query(focused_query, modified_context)
+                
+                # Create answer variation
+                answer_variant = {
+                    "perspective": approach["name"],
+                    "answer": standard_result.get("answer", ""),
+                    "confidence": standard_result.get("confidence", 0.0),
+                    "sources": standard_result.get("sources", []),
+                    "focus_area": approach["focus"],
+                    "metadata": {
+                        **standard_result.get("metadata", {}),
+                        "answer_approach": approach["name"],
+                        "answer_index": i + 1
+                    }
+                }
+                
+                answers.append(answer_variant)
+                
+            except Exception as e:
+                logger.error(f"Error generating answer {i+1}: {e}")
+                # Add fallback answer
+                answers.append({
+                    "perspective": approach["name"],
+                    "answer": f"Unable to generate {approach['name'].lower()} for this query.",
+                    "confidence": 0.1,
+                    "sources": [],
+                    "focus_area": approach["focus"],
+                    "error": str(e)
+                })
+        
+        # Generate summary combining all perspectives
+        summary = self._generate_multi_answer_summary(query, answers)
+        
+        return {
+            "query": query,
+            "answers": answers,
+            "summary": summary,
+            "metadata": {
+                "timestamp": datetime.now().isoformat(),
+                "total_answers": len(answers),
+                "query_time_ms": (time.time() - start_time) * 1000,
+                "approach": "multiple_perspectives"
+            }
+        }
+    
+    def _generate_multi_answer_summary(self, query, answers):
+        """Generate a summary that combines insights from multiple answers"""
+        valid_answers = [a for a in answers if a.get("confidence", 0) > 0.3]
+        
+        if not valid_answers:
+            return "Unable to generate comprehensive analysis for this query."
+        
+        # Extract key insights from each answer
+        insights = []
+        for answer in valid_answers:
+            perspective = answer.get("perspective", "Unknown")
+            content = answer.get("answer", "")
+            
+            # Extract key points (simple approach)
+            if content and len(content) > 50:
+                # Take first meaningful sentence or bullet point
+                sentences = content.split('. ')
+                if sentences:
+                    key_insight = sentences[0][:200] + "..." if len(sentences[0]) > 200 else sentences[0]
+                    insights.append(f"**{perspective}**: {key_insight}")
+        
+        if insights:
+            summary = "**Multi-Perspective Analysis:**\n\n" + "\n\n".join(insights)
+            summary += f"\n\n*Analysis based on {len(valid_answers)} different perspectives*"
+            return summary
+        else:
+            return "Multiple perspectives analyzed - see individual answers for details."
+    
     def _get_domain_context(self, query, doc_type):
         """Get relevant domain knowledge for the query"""
         context_parts = []
@@ -880,7 +1008,7 @@ with a risk score of {risk_desc}.
         return self.compliance_rules_cache
 
     def add_document_to_index(self, content: str, doc_type: str, metadata: dict = None):
-        """Add a new document to the vector store index"""
+        """Add a new document to the vector store index with Pathway routing"""
         try:
             if not content or not doc_type:
                 logger.warning("Cannot add empty content or missing document type to index")
@@ -888,22 +1016,74 @@ with a risk score of {risk_desc}.
         
             if not metadata:
                 metadata = {}
+                
+            # Route through Pathway for real-time streaming if enabled
+            if self.pathway_enabled and self.pathway_manager:
+                try:
+                    # Create structured data for Pathway streaming
+                    import tempfile
+                    import json
+                    
+                    pathway_data = {
+                        "content": content,
+                        "doc_type": doc_type,
+                        "metadata": {
+                            "timestamp": datetime.now().isoformat(),
+                            "source": metadata.get("source", "unknown"),
+                            "processed_by": "rag_model",
+                            **metadata
+                        }
+                    }
+                    
+                    # Write to appropriate Pathway input directory for real-time processing
+                    pathway_dir = f"{self.pathway_manager.watch_dir}/{doc_type}s"
+                    os.makedirs(pathway_dir, exist_ok=True)
+                    
+                    # Generate unique filename with timestamp
+                    timestamp = int(time.time() * 1000)
+                    filename = f"rag_doc_{timestamp}.json"
+                    filepath = os.path.join(pathway_dir, filename)
+                    
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        json.dump(pathway_data, f, indent=2)
+                    
+                    logger.info(f"✅ Document routed through Pathway streaming pipeline: {filepath}")
+                    
+                    # Also add to local vector store for immediate availability
+                    # This provides hybrid approach: immediate local access + Pathway streaming
+                    success = self._add_to_local_vector_store(content, doc_type, metadata)
+                    
+                    return success
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to route through Pathway, falling back to local indexing: {e}")
+                    # Fall through to local indexing only
         
-        # Create text chunks for better indexing
+            # Local vector store indexing (fallback or when Pathway not enabled)
+            return self._add_to_local_vector_store(content, doc_type, metadata)
+    
+        except Exception as e:
+            logger.error(f"Error adding document to index: {e}")
+            return False
+    
+    def _add_to_local_vector_store(self, content: str, doc_type: str, metadata: dict):
+        """Add document to local FAISS vector store"""
+        try:
+            # Create text chunks for better indexing
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1000,
                 chunk_overlap=200,
                 separators=["\n\n", "\n", ". ", " ", ""]
             )
         
-        # Split text into chunks
+            # Split text into chunks
             chunks = text_splitter.split_text(content)
             logger.info(f"Split document into {len(chunks)} chunks")
         
-        # Create document objects
+            # Create document objects
             docs = []
             for i, chunk in enumerate(chunks):
-            # Skip empty chunks
+                # Skip empty chunks
                 if not chunk.strip():
                     continue
                 
@@ -936,9 +1116,9 @@ with a risk score of {risk_desc}.
             self.last_checked[doc_type] = time.time()
         
             return True
-    
+            
         except Exception as e:
-            logger.error(f"Error adding document to index: {e}")
+            logger.error(f"Error adding to local vector store: {e}")
             return False
 
     def calculate_late_fees(self, invoice_amount, days_overdue):
@@ -1190,7 +1370,7 @@ with a risk score of {risk_desc}.
                 relevance = self._calculate_doc_relevance(doc, query)
                 score += relevance * 0.4
                 
-                # Document type priority (30% weight)
+                # Document type priority (30% weight) - higher priority for invoices
                 doc_type = doc.metadata.get('doc_type', 'unknown')
                 type_priority = {'invoice': 0.9, 'shipment': 0.8, 'policy': 0.7}.get(doc_type, 0.5)
                 score += type_priority * 0.3
