@@ -1,5 +1,10 @@
 # Logistics Pulse Copilot Startup Script
-Write-Host "Starting Logistics Pulse Copilot..." -ForegroundColor Green
+Write-Host "Starting Backend Server..." -ForegroundColor Yellow
+Start-Process powershell -ArgumentList @(
+    "-NoExit",
+    "-Command",
+    "cd '$PSScriptRootackend'; python main_enhanced.py"
+) -WindowStyle NormalHost "Starting Logistics Pulse Copilot..." -ForegroundColor Green
 
 # Check if .env files exist
 $backendEnv = "backend\.env"

@@ -17,7 +17,7 @@ if not exist "frontend\.env" (
 if not exist "data\uploads" mkdir "data\uploads"
 
 echo Starting Backend Server...
-start "Backend" cmd /k "cd /d backend && python -m uvicorn main_simple:app --reload --port 8000"
+start "Backend" cmd /k "cd /d backend && python main_enhanced.py"
 
 :: Wait a moment for backend to start
 timeout /t 3 /nobreak >nul
