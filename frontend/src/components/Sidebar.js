@@ -5,53 +5,84 @@ import {
   FaTruck, 
   FaExclamationTriangle, 
   FaCog, 
-  FaUser 
+  FaUser,
+  FaChartBar,
+  FaRobot
 } from 'react-icons/fa';
 
 function Sidebar() {
   const navigation = [
-    { name: 'Dashboard', icon: FaHome, active: true },
-    { name: 'Invoices', icon: FaFileInvoiceDollar, active: false },
-    { name: 'Shipments', icon: FaTruck, active: false },
-    { name: 'Anomalies', icon: FaExclamationTriangle, active: false },
-    { name: 'Settings', icon: FaCog, active: false },
+    { name: 'Dashboard', icon: FaHome, active: true, color: 'text-blue-400' },
+    { name: 'Invoices', icon: FaFileInvoiceDollar, active: false, color: 'text-green-400' },
+    { name: 'Shipments', icon: FaTruck, active: false, color: 'text-purple-400' },
+    { name: 'Anomalies', icon: FaExclamationTriangle, active: false, color: 'text-red-400' },
+    { name: 'Analytics', icon: FaChartBar, active: false, color: 'text-yellow-400' },
+    { name: 'AI Assistant', icon: FaRobot, active: false, color: 'text-indigo-400' },
+    { name: 'Settings', icon: FaCog, active: false, color: 'text-gray-400' },
   ];
   
   return (
-    <div className="fixed w-64 h-screen bg-gray-800 text-white">
+    <div className="fixed w-64 h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-white shadow-2xl">
       <div className="flex flex-col h-full">
-        <div className="p-4 border-b border-gray-700">
-          <h2 className="text-xl font-semibold">Logistics Pulse</h2>
+        <div className="p-6 border-b border-slate-700/50">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+              <FaTruck className="text-white text-lg" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
+                Logistics Pulse
+              </h2>
+              <p className="text-xs text-slate-400">AI Copilot</p>
+            </div>
+          </div>
         </div>
         
         <div className="flex-1 p-4">
-          <ul className="space-y-2">
-            {navigation.map((item) => (
-              <li key={item.name}>
+          <nav className="space-y-2">
+            {navigation.map((item, index) => (
+              <div key={item.name} className="relative group">
                 <a 
                   href="#" 
-                  className={`flex items-center px-3 py-2 rounded-md ${
-                    item.active ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                  className={`flex items-center px-4 py-3 rounded-xl transition-all duration-300 transform hover:scale-105 ${
+                    item.active 
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25' 
+                      : 'text-slate-300 hover:bg-slate-700/50 hover:text-white hover:shadow-lg'
                   }`}
                   onClick={(e) => e.preventDefault()}
                 >
-                  <item.icon className="mr-3 h-5 w-5" />
-                  {item.name}
+                  <item.icon className={`mr-3 h-5 w-5 transition-colors duration-300 ${
+                    item.active ? 'text-white' : item.color
+                  }`} />
+                  <span className="font-medium">{item.name}</span>
+                  {item.active && (
+                    <div className="absolute right-2 w-2 h-2 bg-white rounded-full animate-pulse" />
+                  )}
                 </a>
-              </li>
+                {/* Hover glow effect */}
+                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10" />
+              </div>
             ))}
-          </ul>
+          </nav>
         </div>
         
-        <div className="p-4 border-t border-gray-700">
-          <div className="flex items-center">
-            <div className="flex items-center justify-center bg-gray-600 rounded-full h-10 w-10">
-              <FaUser />
+        <div className="p-4 border-t border-slate-700/50">
+          <div className="flex items-center p-3 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 transition-all duration-300 cursor-pointer group">
+            <div className="relative">
+              <div className="flex items-center justify-center bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full h-12 w-12 shadow-lg">
+                <FaUser className="text-white" />
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-slate-800 animate-pulse" />
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium">{process.env.REACT_APP_USER_NAME || 'User'}</p>
-              <p className="text-xs text-gray-400">Logistics Analyst</p>
+            <div className="ml-3 flex-1">
+              <p className="text-sm font-semibold text-white group-hover:text-blue-400 transition-colors">
+                {process.env.REACT_APP_USER_NAME || 'Admin User'}
+              </p>
+              <p className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors">
+                Logistics Analyst
+              </p>
             </div>
+            <div className="w-2 h-2 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
           </div>
         </div>
       </div>
