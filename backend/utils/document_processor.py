@@ -28,6 +28,9 @@ class PDFProcessor:
             self.ocr_enabled = True
         except ImportError as e:
             logger.warning(f"PDF OCR capabilities limited due to missing dependencies: {e}")
+            self.pdfplumber = None
+            self.pytesseract = None
+            self.Image = None
             self.ocr_enabled = False
     
     def process_pdf(self, file_path: str, doc_type: str) -> Dict[str, Any]:
@@ -59,6 +62,10 @@ class PDFProcessor:
     
     def _extract_text_from_pdf(self, pdf_path: str) -> str:
         """Extract all text content from PDF"""
+        if not self.pdfplumber:
+            logger.error("pdfplumber not available for PDF text extraction")
+            return ""
+            
         try:
             text_content = []
             with self.pdfplumber.open(pdf_path) as pdf:
@@ -73,6 +80,10 @@ class PDFProcessor:
     
     def _extract_tables_from_pdf(self, pdf_path: str) -> List[pd.DataFrame]:
         """Extract tables from PDF"""
+        if not self.pdfplumber:
+            logger.error("pdfplumber not available for PDF table extraction")
+            return []
+            
         try:
             tables = []
             with self.pdfplumber.open(pdf_path) as pdf:
