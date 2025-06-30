@@ -1,0 +1,24 @@
+# Backend Dockerfile for Logistics Pulse Copilot
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend ./backend
+COPY setup_enhanced.py ./
+
+# Initialize data directories (optional, can be handled by entrypoint)
+RUN python setup_enhanced.py || true
+
+# Expose FastAPI port
+EXPOSE 8000
+
+# Start the backend
+CMD ["python", "backend/main_enhanced.py"]
