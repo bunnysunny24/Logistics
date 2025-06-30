@@ -507,7 +507,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.post("/api/upload")
 async def ingest_document(file: UploadFile = File(...)):
-    """Ingest and process a document - API version with anomaly detection"""
+    """Ingest and process a document - API version with comprehensive processing"""
     try:
         # Save the uploaded file
         upload_dir = os.path.join(DATA_DIR, "uploads")
@@ -526,20 +526,51 @@ async def ingest_document(file: UploadFile = File(...)):
         
         # Extract content based on file type
         extracted_text = ""
+        structured_data = []
+        
+        # Handle different file types
         if file_path.lower().endswith('.pdf'):
-            # Make sure document_processor is initialized
+            # PDF processing
             if document_processor:
                 extracted_text = document_processor.extract_text_from_pdf(file_path)
                 logger.info(f"Extracted {len(extracted_text)} characters from PDF")
             else:
                 logger.error("Document processor not initialized")
+                
+        elif file_path.lower().endswith('.csv'):
+            # CSV processing - this is key for structured data
+            try:
+                df = pd.read_csv(file_path)
+                logger.info(f"CSV loaded with {len(df)} rows and {len(df.columns)} columns")
+                
+                # Convert CSV to text for RAG indexing
+                extracted_text = df.to_string()
+                
+                # Extract structured data for anomaly detection
+                for _, row in df.iterrows():
+                    row_data = row.to_dict()
+                    # Clean NaN values
+                    row_data = {k: (v if pd.notna(v) else None) for k, v in row_data.items()}
+                    
+                    # Only process rows with valid IDs (skip headers/empty rows)
+                    if doc_type == "invoice" and row_data.get('invoice_id') and str(row_data.get('invoice_id')).strip() not in ['', 'invoice_id', 'item']:
+                        structured_data.append(row_data)
+                    elif doc_type == "shipment" and row_data.get('shipment_id') and str(row_data.get('shipment_id')).strip() not in ['', 'shipment_id', 'item']:
+                        structured_data.append(row_data)
+                
+                logger.info(f"Extracted {len(structured_data)} valid records from CSV")
+                
+            except Exception as e:
+                logger.error(f"Error processing CSV: {e}")
+                extracted_text = f"CSV file {file.filename} - Error processing: {str(e)}"
+                
         elif file_path.lower().endswith('.txt'):
+            # Text file processing
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     extracted_text = f.read()
                 logger.info(f"Read {len(extracted_text)} characters from text file")
             except UnicodeDecodeError:
-                # Try with a different encoding if UTF-8 fails
                 with open(file_path, 'r', encoding='latin-1') as f:
                     extracted_text = f.read()
                 logger.info(f"Read {len(extracted_text)} characters from text file with latin-1 encoding")
@@ -551,11 +582,15 @@ async def ingest_document(file: UploadFile = File(...)):
         rag_indexed = False
         if extracted_text and rag_model:
             try:
-                # Add to RAG index
                 success = rag_model.add_document_to_index(
                     content=extracted_text,
                     doc_type=doc_type,
-                    metadata={"source": file.filename, "path": file_path}
+                    metadata={
+                        "source": file.filename, 
+                        "path": file_path,
+                        "upload_timestamp": datetime.now().isoformat(),
+                        "record_count": len(structured_data)
+                    }
                 )
                 rag_indexed = success
                 if success:
@@ -564,38 +599,31 @@ async def ingest_document(file: UploadFile = File(...)):
                     logger.error(f"Failed to add document to RAG index")
             except Exception as e:
                 logger.error(f"Error adding to RAG index: {e}")
-        else:
-            if not extracted_text:
-                logger.warning("No text extracted from document")
-            if not rag_model:
-                logger.warning("RAG model not available")
         
-        # Try to extract structured data for anomaly detection
+        # Process structured data for anomaly detection
         detected_anomalies = []
         anomaly_detection_attempted = False
         
-        if extracted_text and anomaly_detector:
+        if structured_data and anomaly_detector:
             try:
                 anomaly_detection_attempted = True
-                logger.info(f"Attempting anomaly detection on uploaded {doc_type}")
+                logger.info(f"Running anomaly detection on {len(structured_data)} {doc_type} records")
                 
-                # Try to parse the extracted text for structured data
-                # This is a simple approach - could be enhanced with better parsing
-                if doc_type == "invoice":
-                    # Try to extract invoice-like data from the text
-                    invoice_data = _extract_invoice_data_from_text(extracted_text, file.filename)
-                    if invoice_data:
-                        anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
+                for record in structured_data:
+                    try:
+                        if doc_type == "invoice":
+                            anomalies = anomaly_detector.detect_invoice_anomalies(record)
+                        else:  # shipment
+                            anomalies = anomaly_detector.detect_shipment_anomalies(record)
+                        
                         detected_anomalies.extend(anomalies)
-                        logger.info(f"Detected {len(anomalies)} anomalies in uploaded invoice")
-                
-                elif doc_type == "shipment":
-                    # Try to extract shipment-like data from the text
-                    shipment_data = _extract_shipment_data_from_text(extracted_text, file.filename)
-                    if shipment_data:
-                        anomalies = anomaly_detector.detect_shipment_anomalies(shipment_data)
-                        detected_anomalies.extend(anomalies)
-                        logger.info(f"Detected {len(anomalies)} anomalies in uploaded shipment")
+                        
+                        if anomalies:
+                            logger.info(f"Found {len(anomalies)} anomalies for {record.get(f'{doc_type}_id', 'unknown')}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error detecting anomalies for record {record.get(f'{doc_type}_id', 'unknown')}: {e}")
+                        continue
                 
                 # Add detected anomalies to the system
                 if detected_anomalies:
@@ -611,7 +639,12 @@ async def ingest_document(file: UploadFile = File(...)):
                             "evidence": anomaly.evidence,
                             "recommendations": anomaly.recommendations,
                             "timestamp": anomaly.timestamp,
-                            "metadata": {**anomaly.metadata, "source": "uploaded_document", "filename": file.filename}
+                            "metadata": {
+                                **anomaly.metadata, 
+                                "source": "uploaded_document", 
+                                "filename": file.filename,
+                                "upload_timestamp": datetime.now().isoformat()
+                            }
                         }
                         anomaly_dicts.append(anomaly_dict)
                     
@@ -619,36 +652,103 @@ async def ingest_document(file: UploadFile = File(...)):
                     anomaly_detector.anomalies.extend(anomaly_dicts)
                     logger.info(f"Added {len(anomaly_dicts)} anomalies from uploaded document to system")
                     
+                    # Save to file
+                    try:
+                        anomaly_detector.save_anomalies(detected_anomalies)
+                        logger.info(f"Saved anomalies to file")
+                    except Exception as e:
+                        logger.warning(f"Could not save anomalies to file: {e}")
+                        
             except Exception as e:
                 logger.error(f"Error in anomaly detection for uploaded document: {e}")
+        elif not structured_data and file_path.lower().endswith('.pdf'):
+            # Try to extract structured data from PDF text
+            if extracted_text and anomaly_detector:
+                try:
+                    anomaly_detection_attempted = True
+                    if doc_type == "invoice":
+                        invoice_data = _extract_invoice_data_from_text(extracted_text, file.filename)
+                        if invoice_data:
+                            anomalies = anomaly_detector.detect_invoice_anomalies(invoice_data)
+                            detected_anomalies.extend(anomalies)
+                    else:
+                        shipment_data = _extract_shipment_data_from_text(extracted_text, file.filename)
+                        if shipment_data:
+                            anomalies = anomaly_detector.detect_shipment_anomalies(shipment_data)
+                            detected_anomalies.extend(anomalies)
+                    
+                    if detected_anomalies:
+                        anomaly_dicts = []
+                        for anomaly in detected_anomalies:
+                            anomaly_dict = {
+                                "id": anomaly.id,
+                                "document_id": anomaly.document_id,
+                                "anomaly_type": anomaly.anomaly_type,
+                                "risk_score": anomaly.risk_score,
+                                "severity": anomaly.severity,
+                                "description": anomaly.description,
+                                "evidence": anomaly.evidence,
+                                "recommendations": anomaly.recommendations,
+                                "timestamp": anomaly.timestamp,
+                                "metadata": {
+                                    **anomaly.metadata, 
+                                    "source": "uploaded_pdf_extraction", 
+                                    "filename": file.filename
+                                }
+                            }
+                            anomaly_dicts.append(anomaly_dict)
+                        
+                        anomaly_detector.anomalies.extend(anomaly_dicts)
+                        logger.info(f"Added {len(anomaly_dicts)} anomalies from PDF text extraction")
+                        
+                except Exception as e:
+                    logger.error(f"Error in PDF text anomaly detection: {e}")
         
-        return {
+        # Prepare response
+        response = {
             "success": True,
             "message": "Document processed successfully",
             "filename": file.filename,
             "size": len(content),
-            "text_extracted": len(extracted_text) > 0,
-            "characters_extracted": len(extracted_text),
-            "rag_indexed": rag_indexed,
             "document_type": doc_type,
-            "anomaly_detection": {
-                "attempted": anomaly_detection_attempted,
-                "anomalies_detected": len(detected_anomalies),
-                "anomalies": [
-                    {
-                        "id": a.id,
-                        "type": a.anomaly_type,
-                        "severity": a.severity,
-                        "risk_score": a.risk_score,
-                        "description": a.description
-                    } for a in detected_anomalies
-                ] if detected_anomalies else []
+            "processing_summary": {
+                "text_extracted": len(extracted_text) > 0,
+                "characters_extracted": len(extracted_text),
+                "structured_records": len(structured_data),
+                "rag_indexed": rag_indexed,
+                "anomaly_detection": {
+                    "attempted": anomaly_detection_attempted,
+                    "anomalies_detected": len(detected_anomalies),
+                    "high_risk": len([a for a in detected_anomalies if a.risk_score >= 0.8]),
+                    "medium_risk": len([a for a in detected_anomalies if 0.5 <= a.risk_score < 0.8]),
+                    "low_risk": len([a for a in detected_anomalies if a.risk_score < 0.5])
+                }
             }
         }
+        
+        # Add anomaly details if any were found
+        if detected_anomalies:
+            response["anomalies"] = [
+                {
+                    "id": a.id,
+                    "type": a.anomaly_type,
+                    "severity": a.severity,
+                    "risk_score": a.risk_score,
+                    "description": a.description,
+                    "document_id": a.document_id
+                } for a in detected_anomalies[:10]  # Limit to first 10 for response size
+            ]
+        
+        return response
+        
     except Exception as e:
         error_msg = f"Failed to process document: {str(e)}"
         logger.error(error_msg)
-        return JSONResponse(status_code=500, content={"error": error_msg})
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": error_msg,
+            "filename": file.filename if 'file' in locals() else "unknown"
+        })
 
 def _extract_invoice_data_from_text(text: str, filename: str) -> Optional[Dict[str, Any]]:
     """Extract invoice data from text for anomaly detection"""
